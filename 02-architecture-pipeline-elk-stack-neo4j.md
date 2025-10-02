@@ -80,36 +80,49 @@ Cette stack permet de gérer les données textuelles (via Elasticsearch) et rela
 
 
 
-
-### Variante 1 – Simple et directe
+### Variante A — Ultra-safe (ASCII, 1 ligne/label)
 
 ```mermaid
 flowchart TD
   A[Application] --> B[REST API]
-  B --> C[Logstash\n(collecte et transformation)]
-  B --> N[Neo4j\n(base de données graphe)]
-  C --> E[Elasticsearch\n(indexation et recherche)]
-  E --> K[Kibana\n(visualisation et analyse)]
-  N --> CY[Cypher\n(langage de requêtes)]
+  B --> C[Logstash - collecte et transformation]
+  B --> N[Neo4j - base de donnees graphe]
+  C --> E[Elasticsearch - indexation et recherche]
+  E --> K[Kibana - visualisation et analyse]
+  N --> CY[Cypher - langage de requetes]
 ```
 
 ---
 
-### Variante 2 – Avec sous-graphes (Elastic Stack / Graph DB)
+### Variante B — Labels entre guillemets + retours à la ligne
+
+```mermaid
+flowchart TD
+  A["Application"] --> B["REST API"]
+  B --> C["Logstash\ncollecte et transformation"]
+  B --> N["Neo4j\nbase de données graphe"]
+  C --> E["Elasticsearch\nindexation et recherche"]
+  E --> K["Kibana\nvisualisation et analyse"]
+  N --> CY["Cypher\nlangage de requêtes"]
+```
+
+---
+
+### Variante C — Avec sous-graphes (labels 1 ligne, ASCII)
 
 ```mermaid
 flowchart TD
   A[Application] --> B[REST API]
 
   subgraph Elastic_Stack [Elastic Stack]
-    C[Logstash\n(collecte et transformation)]
-    E[Elasticsearch\n(indexation et recherche)]
-    K[Kibana\n(visualisation et analyse)]
+    C[Logstash - collecte et transformation]
+    E[Elasticsearch - indexation et recherche]
+    K[Kibana - visualisation et analyse]
   end
 
   subgraph Graph_DB [Base de graphes]
-    N[Neo4j\n(base de données graphe)]
-    CY[Cypher\n(langage de requêtes)]
+    N[Neo4j - base de donnees graphe]
+    CY[Cypher - langage de requetes]
   end
 
   B --> C
@@ -121,30 +134,16 @@ flowchart TD
 
 ---
 
-### Variante 3 – Avec Beats en amont
-
-```mermaid
-flowchart TD
-  A[Application] --> BE[Beats\n(shippers légers)]
-  BE --> C[Logstash\n(collecte et transformation)]
-  A --> B[REST API]
-  B --> N[Neo4j\n(base de données graphe)]
-  C --> E[Elasticsearch\n(indexation et recherche)]
-  E --> K[Kibana\n(visualisation et analyse)]
-  N --> CY[Cypher\n(langage de requêtes)]
-```
-
----
-
-### Variante 4 – En horizontal (Left → Right)
+### Variante D — Orientation horizontale (LR) + guillemets
 
 ```mermaid
 flowchart LR
-  A[Application] --> B[REST API]
-  B --> C[Logstash\n(collecte et transformation)]
-  C --> E[Elasticsearch\n(indexation et recherche)]
-  E --> K[Kibana\n(visualisation et analyse)]
-  B --> N[Neo4j\n(base de données graphe)]
-  N --> CY[Cypher\n(langage de requêtes)]
+  A["Application"] --> B["REST API"]
+  B --> C["Logstash\ncollecte et transformation"]
+  C --> E["Elasticsearch\nindexation et recherche"]
+  E --> K["Kibana\nvisualisation et analyse"]
+  B --> N["Neo4j\nbase de données graphe"]
+  N --> CY["Cypher\nlangage de requêtes"]
 ```
+
 
