@@ -150,10 +150,6 @@ flowchart LR
 
 
 
-
-
-# TL;DR
-
 * **ELK** → logs/événements volumineux, **recherche texte ultra-rapide**, **tableaux de bord** et agrégations temporelles.
 * **Neo4j** → **relations et chemins** (qui dépend de quoi, qui est connecté à qui), **détection de patterns** dans un graphe.
 * **Les deux** → quand tu as **à la fois** des métriques/logs (ELK) **et** des questions de **réseau/relations** (Neo4j).
