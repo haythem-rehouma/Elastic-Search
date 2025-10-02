@@ -32,6 +32,8 @@ En résumé, **Elasticsearch est un moteur de recherche et d’indexation distri
 
 
 
+<br/>
+<br/>
 
 # Annexe
 
@@ -52,13 +54,13 @@ En résumé, **Elasticsearch est un moteur de recherche et d’indexation distri
   * L’interface de visualisation et d’analyse.
   * Permet de créer des tableaux de bord interactifs, des graphiques et des recherches sur les données stockées dans Elasticsearch.
 
-📌 Exemple d’utilisation :
+### Exemple d’utilisation :
 Un système d’entreprise génère des **logs applicatifs** et des **événements système**.
 
 * **Logstash** collecte ces logs, les nettoie et les transforme.
 * **Elasticsearch** indexe les données pour les rendre consultables rapidement.
 * **Kibana** permet aux développeurs, analystes ou équipes de sécurité d’explorer et de visualiser ces données en temps réel.
 
-⚡ Aujourd’hui, on parle aussi beaucoup de la **stack Elastic** (parfois **Elastic Stack**), qui inclut **ELK + Beats** (un autre composant pour collecter les données légères).
+- Aujourd’hui, on parle aussi beaucoup de la **stack Elastic** (parfois **Elastic Stack**), qui inclut **ELK + Beats** (un autre composant pour collecter les données légères).
 
 Veux-tu que je te fasse un **schéma clair** qui illustre le rôle de chaque composant dans ELK, comme ton pipeline avec Neo4j ?
