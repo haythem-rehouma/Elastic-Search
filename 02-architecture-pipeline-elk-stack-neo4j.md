@@ -260,27 +260,6 @@ flowchart TD
 
 
 
-```mermaid
-flowchart TD
-  A[Application] --> L[Logstash]
-  A --> B[REST API]
-
-  L --> ES[Elasticsearch]
-  ES --> K[Kibana]
-
-  B --> N[Neo4j]
-  N --> C[Cypher]
-
-  note right of ES
-    Recherche, agrégations,
-    dashboards, alerting
-  end
-
-  note right of N
-    Chemins, voisins, motifs,
-    analyse de relations
-  end
-```
 
 
 
