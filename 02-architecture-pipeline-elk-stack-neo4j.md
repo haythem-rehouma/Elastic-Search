@@ -145,3 +145,144 @@ flowchart LR
 ```
 
 
+
+# Annexe 2
+
+
+
+
+
+# TL;DR
+
+* **ELK** → logs/événements volumineux, **recherche texte ultra-rapide**, **tableaux de bord** et agrégations temporelles.
+* **Neo4j** → **relations et chemins** (qui dépend de quoi, qui est connecté à qui), **détection de patterns** dans un graphe.
+* **Les deux** → quand tu as **à la fois** des métriques/logs (ELK) **et** des questions de **réseau/relations** (Neo4j).
+
+
+
+# Quand ELK est le bon choix
+
+**Objectif principal :** chercher vite et visualiser de gros volumes de données “à plat”.
+
+* Logs applicatifs, traces, métriques, events **time-series**.
+* **Recherche full-text**, filtres, facettes, tris.
+* **Agrégations** (moyenne, somme, percentiles) sur de très gros volumes.
+* **Dashboards** en temps réel, **alerting**, corrélation basique par champs.
+* Besoin d’**ingestion multi-sources** + nettoyage → **Logstash/Beats**.
+* Exemples : observabilité/SIEM, KPI métier en continu, analytics web, erreurs de prod.
+
+**Signes que c’est ELK :**
+
+* Tes questions ressemblent à “combien, quand, top N, tendance, taux d’erreur”.
+* Tu scrolles/filtres des logs et construis des **graphiques** dans Kibana.
+* Tes données sont **documents JSON** avec des timestamps.
+
+
+
+# Quand Neo4j est le bon choix
+
+**Objectif principal :** comprendre et interroger des **relations complexes**.
+
+* Modéliser **un réseau** (personnes, services, dépendances, équipements).
+* Questions de **chemin** / **voisinage** / **communautés** : “qui est à 2 sauts de… ?”, “quel chemin relie X à Y ?”.
+* **Détection de motifs** (patterns) : fraude, recommandation, impact d’une panne.
+* Exemples : cartographie d’architecture (microservices → dépendances), **BOM** logiciels, graphe de connaissances, IAM (qui a accès à quoi).
+
+**Signes que c’est Neo4j :**
+
+* Tes questions commencent par “**montre le lien entre…**”, “**trouve le chemin** le plus court”, “**quels voisins** partagés ?”.
+* Tu veux **évoluer** le modèle par **relations** et **types de nœuds** sans souffrir de jointures lourdes.
+* Tu écris des requêtes **Cypher** (patterns de graphes).
+
+
+
+# Anti-patterns (à éviter)
+
+* **Forcer Elasticsearch à faire du graphe** (chaînes de jointures ou “path” complexes) → douloureux et limité.
+* **Indexer des logs dans Neo4j** pour faire des dashboards time-series → pas adapté; tu perdras en vitesse et en facilité de visu.
+
+
+# Quand combiner ELK + Neo4j
+
+**Cas fréquents en prod :**
+
+* Tu ingères **une fois** → tu **branches** :
+
+  * vers **Elasticsearch** pour recherche/agrégations/dashboards,
+  * vers **Neo4j** pour modèles de **dépendances** et **analyses de chemins**.
+* Exemples :
+
+  * Observabilité **+** carte des dépendances microservices.
+  * SIEM **+** graphe de relations entités-IP-machines-comptes pour enquêtes.
+  * E-commerce : **logs de clics** (ELK) **+** **graphe produits-utilisateurs** (Neo4j) pour recommandations.
+
+
+
+# Petit décideur visuel
+
+```mermaid
+flowchart TD
+  Q1{Tes questions portent surtout sur\ntexte, filtres, agrégations, temps ?}
+  Q2{Tes questions portent surtout sur\nrelations, chemins, patterns ?}
+
+  Q1 -->|Oui| ELK[Choisir ELK]
+  Q1 -->|Non| Q2
+  Q2 -->|Oui| G[Choisir Neo4j]
+  Q2 -->|Non| BOTH[Combiner ou requalifier le besoin]
+
+  ELK --> NEXT1[Dashboards, alerting, recherche]
+  G --> NEXT2[Chemins, communautés, impact]
+  BOTH --> PATTERN[Ingestion -> branchement ELK + Neo4j]
+```
+
+
+
+# Grille rapide de décision
+
+| Critère             | ELK                                 | Neo4j                                         |
+| ------------------- | ----------------------------------- | --------------------------------------------- |
+| **Type de données** | Documents JSON, logs, time-series   | Nœuds + arêtes (graphe)                       |
+| **Questions clés**  | Combien, quand, top N, tendances    | Qui est relié à qui, quel chemin, communautés |
+| **Latence/Volume**  | Très gros volumes, recherche rapide | Relations profondes, traversées efficaces     |
+| **Visualisation**   | Kibana (dashboards/alerting)        | Outils graphes (Bloom) / requêtes Cypher      |
+| **Modèle**          | Schéma souple par champs            | Schéma riche en relations                     |
+| **Ingestion**       | Beats/Logstash natifs               | ETL vers nœuds + relations                    |
+
+
+
+# Exemples concrets
+
+* **Prod/Observabilité** : erreurs 5xx/min, latence P95, logs d’accès → **ELK**.
+* **Dépendances microservices** : “si `auth` tombe, qui est impacté ?” → **Neo4j** (chemins).
+* **Fraude** : “cartes, comptes et IP partagées en 3 sauts” → **Neo4j**.
+* **Marketing web** : top pages, conversions par source → **ELK**.
+* **Recommandations** : “utilisateurs qui ont acheté ensemble” → **Neo4j** (et tu peux afficher les résultats dans un dashboard ELK si tu veux un suivi).
+
+
+
+```mermaid
+flowchart TD
+  A[Application] --> L[Logstash]
+  A --> B[REST API]
+
+  L --> ES[Elasticsearch]
+  ES --> K[Kibana]
+
+  B --> N[Neo4j]
+  N --> C[Cypher]
+
+  note right of ES
+    Recherche, agrégations,
+    dashboards, alerting
+  end
+
+  note right of N
+    Chemins, voisins, motifs,
+    analyse de relations
+  end
+```
+
+
+
+
+
