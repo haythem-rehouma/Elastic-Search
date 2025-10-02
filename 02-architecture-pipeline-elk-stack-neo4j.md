@@ -1,6 +1,6 @@
 # Exemple d'intégraion Pipeline #1
 
-Bonne question !
+
 
 **ELK** est un acronyme qui désigne une **stack logicielle open-source** très utilisée pour la collecte, l’analyse et la visualisation de données, en particulier les **logs** :
 
