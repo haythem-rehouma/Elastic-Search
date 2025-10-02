@@ -63,4 +63,3 @@ Un système d’entreprise génère des **logs applicatifs** et des **événemen
 
 - Aujourd’hui, on parle aussi beaucoup de la **stack Elastic** (parfois **Elastic Stack**), qui inclut **ELK + Beats** (un autre composant pour collecter les données légères).
 
-Veux-tu que je te fasse un **schéma clair** qui illustre le rôle de chaque composant dans ELK, comme ton pipeline avec Neo4j ?
