@@ -73,3 +73,45 @@ Je vous propose une représentation de la stack combinant **Elasticsearch**, **L
 - **Kibana** : Outil de visualisation permettant d'afficher et d'analyser les données d’Elasticsearch.
 
 Cette stack permet de gérer les données textuelles (via Elasticsearch) et relationnelles (via Neo4j) avec des visualisations dans Kibana pour une analyse efficace.
+
+<br/>
+
+# Annexe 1
+
+
+
+```mermaid
+flowchart TD
+    %% Orientation
+    %% TD = Top -> Down
+
+    A[Application] --> B[REST API]
+
+    %% Branchements vers traitement et graphe
+    B --> C[Logstash<br/>(collecte & transformation)]
+    B --> N[Neo4j<br/>(Base de données graphe)]
+
+    %% Flux Logstash -> Elasticsearch -> Kibana
+    C --> E[Elasticsearch<br/>(Indexation & Recherche)]
+    E --> K[Kibana<br/>(Visualisation & Analyse)]
+
+    %% Encadrer les composants Elastic
+    subgraph Elastic_Stack[Elastic Stack]
+      direction TB
+      C
+      E
+      K
+    end
+
+    %% Encadrer Neo4j + langage
+    subgraph Graph_DB[Base de graphes]
+      direction TB
+      N --> CY[Cypher<br/>(Langage de requêtes)]
+    end
+
+    %% (Option) Beats en amont de Logstash
+    %% Décommentez ces deux lignes si vous utilisez Beats :
+    %% BE[Beats<br/>(shippers légers)] --> C
+    %% A --> BE
+```
+
