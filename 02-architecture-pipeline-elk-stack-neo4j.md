@@ -62,6 +62,46 @@ Je vous propose une représentation de la stack combinant **Elasticsearch**, **L
           +-------------------------------+
 ```
 
+
+
+```mermaid
+flowchart TD
+  A[Application] --> B[REST API]
+  B --> C[Logstash]
+  B --> N[Neo4j]
+  C --> E[Elasticsearch - indexation et recherche]
+  N --> CY[Cypher - langage de requetes]
+  E --> K[Kibana - visualisation et analyse]
+```
+
+
+
+```mermaid
+flowchart TD
+  A[Application] --> B[REST API]
+
+  subgraph Elastic_Stack [Elastic Stack]
+    C[Logstash - collecte et transformation]
+    E[Elasticsearch - indexation et recherche]
+    K[Kibana - visualisation et analyse]
+  end
+
+  subgraph Graph_DB [Graph database]
+    N[Neo4j]
+    CY[Cypher - query language]
+  end
+
+  B --> C
+  B --> N
+  C --> E
+  E --> K
+  N --> CY
+```
+
+
+
+
+
 # Explications de chaque composant :
 
 - **Application** : Le logiciel ou l’interface que les utilisateurs utilisent pour interagir avec les données.
