@@ -19,7 +19,7 @@ Pré-requis : Docker/Compose, `curl` (et idéalement `jq`), 3 Go RAM libres, por
 <br/>
 <br/>
 
-# 0) Pré-requis rapides
+# 0) Pré-requis rapides (Annexe 0)
 
 * Docker et Docker Compose installés
   Vérifier : `docker --version` et `docker compose version`
@@ -31,12 +31,53 @@ Pré-requis : Docker/Compose, `curl` (et idéalement `jq`), 3 Go RAM libres, por
 
 
 
-# 1) Lancer Elasticsearch + Kibana (compose prêt à copier/coller)
+<br/>
+<br/>
 
-Dans ton **HOME** ou le Desktop :
+
+
+# Partie 1 — Démarrage complet d’ELK en Docker (avec persistance)
+
+## A) Pré-requis rapides
+
+```bash
+# 1) Docker + Compose plugin
+docker --version
+docker compose version
+
+# 2) Ports libres (9200 pour ES, 5601 pour Kibana)
+ss -lnt | grep -E ':9200|:5601' || echo "OK: ports libres"
+```
+
+Si un port est occupé, libère-le :
+
+```bash
+# Voir qui écoute
+sudo ss -ltnp | grep -E ':9200|:5601'
+# Exemple de kill (PID à adapter)
+sudo kill -9 <PID>
+# Si c'est un conteneur Docker
+docker ps | grep -E '9200|5601'
+docker stop <CONTAINER_ID>
+```
+
+Optionnel mais recommandé (compatibilité) :
+
+```bash
+# Souvent inutile en single-node, mais utile selon l’hôte
+echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-elasticsearch.conf
+sudo sysctl --system
+```
+
+## B) Arborescence de travail
 
 ```bash
 mkdir -p ~/elk-news && cd ~/elk-news
+```
+
+## C) docker-compose.yml (persistance via volume nommé)
+
+```bash
 cat > docker-compose.yml <<'YAML'
 services:
   elasticsearch:
@@ -55,6 +96,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 60
+    restart: unless-stopped
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.14.3
@@ -67,24 +109,141 @@ services:
       - XPACK_SECURITY_ENABLED=false
     ports:
       - "5601:5601"
+    restart: unless-stopped
 
 volumes:
   esdata:
+    name: elk_esdata
 YAML
-
-docker compose up -d
-docker compose ps
 ```
 
-Test rapide :
+## D) Lancer, vérifier, logs
 
 ```bash
-curl -s http://localhost:9200 | jq '.'
-# => "tagline": "You Know, for Search"
+docker compose up -d
+docker compose ps
+docker compose logs -f elasticsearch   # Ctrl+C pour quitter
 ```
 
-Ouvre **Kibana** : [http://localhost:5601](http://localhost:5601)
-(aucun login demandé, sécurité désactivée pour le LAB)
+## E) Tests rapides (API Elasticsearch)
+
+```bash
+# 1) Ping/version
+curl -s http://localhost:9200 | jq '.'
+
+# 2) Santé du cluster
+curl -s http://localhost:9200/_cluster/health?pretty
+
+# 3) Infos noeud
+curl -s http://localhost:9200/_nodes?pretty | jq '.nodes | keys'
+```
+
+Ouvre Kibana : [http://localhost:5601](http://localhost:5601)
+(Aucun login demandé, sécurité désactivée pour le lab.)
+
+## F) Persistance (volume nommé)
+
+Le volume nommé `elk_esdata` conserve les données entre redéploiements.
+
+```bash
+# Redéploiement normal (données conservées)
+docker compose down
+docker compose up -d
+
+# Attention : ceci SUPPRIME les données
+docker compose down -v
+```
+
+Inspecter l’emplacement réel sur la VM :
+
+```bash
+docker volume inspect elk_esdata | jq -r '.[0].Mountpoint'
+sudo ls -lah /var/lib/docker/volumes/elk_esdata/_data
+```
+
+## G) Sauvegarde et restauration du volume
+
+Sauvegarde (.tar.gz) :
+
+```bash
+mkdir -p ~/elk-news/backup
+docker run --rm \
+  -v elk_esdata:/vol \
+  -v ~/elk-news/backup:/backup \
+  alpine sh -c "cd /vol && tar czf /backup/elk_esdata_$(date +%F_%H%M).tar.gz ."
+ls -lh ~/elk-news/backup
+```
+
+Restauration dans le même volume :
+
+```bash
+docker compose down
+docker run --rm -v elk_esdata:/vol alpine sh -c "rm -rf /vol/*"
+docker run --rm \
+  -v elk_esdata:/vol \
+  -v ~/elk-news/backup:/backup \
+  alpine sh -c "cd /vol && tar xzf /backup/elk_esdata_YYYY-MM-DD_HHMM.tar.gz"
+docker compose up -d
+```
+
+Clonage vers un nouveau volume :
+
+```bash
+docker volume create elk_esdata_clone
+docker run --rm \
+  -v elk_esdata_clone:/vol \
+  -v ~/elk-news/backup:/backup \
+  alpine sh -c "cd /vol && tar xzf /backup/elk_esdata_YYYY-MM-DD_HHMM.tar.gz"
+docker volume ls
+```
+
+## H) Dépannage express
+
+1. Ports 9200/5601 occupés
+   – Identifie et stoppe le processus (ss/kill) ou change le mapping (ex. `19200:9200`, `15601:5601`) dans le compose.
+
+2. Permissions en bind-mount
+   – Préfère les volumes nommés. En bind-mount, prépare le dossier :
+
+```bash
+sudo mkdir -p /srv/elk/esdata
+sudo chown -R 1000:1000 /srv/elk/esdata
+```
+
+3. ES ne devient pas healthy
+   – Regarde les logs :
+
+```bash
+docker compose logs -f elasticsearch
+```
+
+– Vérifie la RAM allouée via `ES_JAVA_OPTS`.
+– Assure `vm.max_map_count` suffisant (section A).
+– Si tu as importé des données d’une autre version et que ça bloque, repars proprement (backup, puis `down -v`, puis `up -d`, puis réindexation).
+
+4. Perte de données inattendue
+   – Tu as probablement fait `down -v` ou modifié le nom du volume. Vérifie `docker volume ls` et `volumes: { esdata: { name: elk_esdata } }`.
+
+## I) Commandes utiles (récap)
+
+```bash
+# cycle
+docker compose up -d
+docker compose ps
+docker compose logs -f db   # ici "db" n'existe pas, utilise "elasticsearch" ou "kibana"
+docker compose logs -f elasticsearch
+docker compose logs -f kibana
+docker compose down          # garde les volumes
+docker compose down -v       # supprime aussi les volumes (données perdues)
+
+# volumes
+docker volume ls
+docker volume inspect elk_esdata
+docker run --rm -it -v elk_esdata:/vol alpine sh  # shell pour voir /vol
+```
+
+Cette partie 1 met en place une base ELK fiable et persistante sur ta VM. À partir de là, tu peux passer à la Partie 2 du TP : création de l’index `news` avec mapping propre, puis ingestion NDJSON via `_bulk`.
+
 
 ---
 
@@ -536,9 +695,9 @@ docker compose down -v
 <br/>
 <br/>
 
-##### Annexe 1 - Procédure **rapide et sûre** pour libérer **9200** (Elasticsearch) ou **5601** (Kibana) quand `ss -lnt | grep -E ':9200|:5601'` montre qu’ils sont occupés.
+### Annexe 0 - Procédure **rapide et sûre** pour libérer **9200** (Elasticsearch) ou **5601** (Kibana) quand `ss -lnt | grep -E ':9200|:5601'` montre qu’ils sont occupés.
 
-## 1) Identifier le processus fautif
+## 0.1) Identifier le processus fautif
 
 ```bash
 # Voir le PID et le binaire qui écoute
@@ -553,7 +712,7 @@ sudo fuser 9200/tcp
 sudo fuser 5601/tcp
 ```
 
-## 2) Si c’est un **container Docker**
+## 0.2) Si c’est un **container Docker**
 
 ```bash
 docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Ports}}' | grep -E '9200|5601'
@@ -567,7 +726,7 @@ docker compose down
 docker stop es-news kb-news 2>/dev/null || true
 ```
 
-## 3) Si c’est un **service système** (install local)
+## 0.3) Si c’est un **service système** (install local)
 
 Elasticsearch/Kibana installés hors Docker occupent souvent ces ports.
 
@@ -580,7 +739,7 @@ sudo systemctl stop elasticsearch kibana
 sudo systemctl disable elasticsearch kibana
 ```
 
-## 4) Si c’est un **processus “perdu”** (lancé à la main)
+## 0.4) Si c’est un **processus “perdu”** (lancé à la main)
 
 1. Récupérer le **PID** (depuis `ss`/`lsof`), puis :
 
@@ -591,19 +750,19 @@ sudo kill -15 <PID>
 sudo kill -9 <PID>
 ```
 
-## 5) Vérifier que le port est libre
+## 0.5) Vérifier que le port est libre
 
 ```bash
 ss -lnt | grep -E ':9200|:5601' || echo "Ports 9200/5601 libres."
 ```
 
-## 6) En dernier recours (rare)
+## 0.6) En dernier recours (rare)
 
 * Un processus se relance tout seul ? Chercher un **service** associé (systemd, pm2, supervisor, snap) et le désactiver.
 * Conflit persistant dans une autre stack Docker ?
   Lister tout : `docker ps -a | grep -E '9200|5601'`, puis `docker stop && docker rm`.
 
----
+
 
 ### Astuce si tu **ne peux pas** libérer tout de suite
 
