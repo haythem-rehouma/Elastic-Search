@@ -529,3 +529,99 @@ docker compose down -v
 * **Aucune donnée retournée ?**
   Vérifie `/_count`, puis tes filtres (`date` gte/lte, `category.keyword` vs `category`).
 
+
+
+
+
+<br/>
+<br/>
+
+# Annexe 1 - Procédure **rapide et sûre** pour libérer **9200** (Elasticsearch) ou **5601** (Kibana) quand `ss -lnt | grep -E ':9200|:5601'` montre qu’ils sont occupés.
+
+## 1) Identifier le processus fautif
+
+```bash
+# Voir le PID et le binaire qui écoute
+sudo ss -lntp | grep -E ':9200|:5601'
+
+# Alternative (souvent plus verbeux)
+sudo lsof -i :9200
+sudo lsof -i :5601
+
+# Autre option
+sudo fuser 9200/tcp
+sudo fuser 5601/tcp
+```
+
+## 2) Si c’est un **container Docker**
+
+```bash
+docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Ports}}' | grep -E '9200|5601'
+# Stopper / supprimer
+docker stop <CONTAINER_ID_OR_NAME>
+docker rm   <CONTAINER_ID_OR_NAME>
+
+# Si lancé via compose dans ce dossier
+docker compose down
+# Si lancé ailleurs et tu connais le nom du service
+docker stop es-news kb-news 2>/dev/null || true
+```
+
+## 3) Si c’est un **service système** (install local)
+
+Elasticsearch/Kibana installés hors Docker occupent souvent ces ports.
+
+```bash
+# Vérifier l’état
+systemctl status elasticsearch kibana
+
+# Arrêter et désactiver (pour libérer définitivement)
+sudo systemctl stop elasticsearch kibana
+sudo systemctl disable elasticsearch kibana
+```
+
+## 4) Si c’est un **processus “perdu”** (lancé à la main)
+
+1. Récupérer le **PID** (depuis `ss`/`lsof`), puis :
+
+```bash
+# Arrêt propre
+sudo kill -15 <PID>
+# Si ça ne tombe pas en 3–5 s :
+sudo kill -9 <PID>
+```
+
+## 5) Vérifier que le port est libre
+
+```bash
+ss -lnt | grep -E ':9200|:5601' || echo "Ports 9200/5601 libres."
+```
+
+## 6) En dernier recours (rare)
+
+* Un processus se relance tout seul ? Chercher un **service** associé (systemd, pm2, supervisor, snap) et le désactiver.
+* Conflit persistant dans une autre stack Docker ?
+  Lister tout : `docker ps -a | grep -E '9200|5601'`, puis `docker stop && docker rm`.
+
+---
+
+### Astuce si tu **ne peux pas** libérer tout de suite
+
+Tu peux changer les ports dans `docker-compose.yml` :
+
+```yaml
+# à la place de 9200:9200 et 5601:5601
+ports:
+  - "19200:9200"
+  ...
+  - "15601:5601"
+```
+
+Puis relancer :
+
+```bash
+docker compose up -d
+```
+
+Et tu accéderas via `http://localhost:19200` (ES) et `http://localhost:15601` (Kibana).
+
