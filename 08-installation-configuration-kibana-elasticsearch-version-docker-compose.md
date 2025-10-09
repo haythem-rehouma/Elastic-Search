@@ -1,10 +1,28 @@
-# 0) Dossier de projet
+# 0) (Optionnel) Libérer les ports 9200/9300/5601
+
+```bash
+# Stopper d’anciens services/containers
+sudo systemctl stop elasticsearch kibana 2>/dev/null || true
+sudo systemctl disable elasticsearch kibana 2>/dev/null || true
+sudo systemctl mask    elasticsearch kibana 2>/dev/null || true
+
+docker compose down 2>/dev/null || true
+docker stop $(docker ps -q) 2>/dev/null || true
+
+# Vérifier et libérer 5601 si besoin
+sudo ss -ltnp | egrep ':(9200|9300|5601)\b' || echo "OK: ports libres"
+sudo fuser -k -n tcp 5601 2>/dev/null || true
+```
+
+---
+
+# 1) Dossier de projet
 
 ```bash
 mkdir elk-dev && cd elk-dev
 ```
 
-# 1) `.env` — variables (modifiez le mot de passe si vous voulez)
+# 2) `.env` — variables (modifiez le mot de passe si vous voulez)
 
 ```bash
 cat > .env << 'ENV'
@@ -15,10 +33,12 @@ ES_JAVA_OPTS=-Xms1g -Xmx1g
 KIBANA_ENCRYPTION_KEY1=change_me_to_a_very_long_random_string_key_1_________
 KIBANA_ENCRYPTION_KEY2=change_me_to_a_very_long_random_string_key_2_________
 KIBANA_ENCRYPTION_KEY3=change_me_to_a_very_long_random_string_key_3_________
+# (sera ajouté automatiquement à l'étape 4)
+# ELASTICSEARCH_SERVICEACCOUNTTOKEN=
 ENV
 ```
 
-# 2) `docker-compose.yml` — stack minimal (sécurité ON, HTTP sans TLS)
+# 3) `docker-compose.yml` — sécurité ON, HTTP sans TLS
 
 ```yaml
 services:
@@ -29,12 +49,16 @@ services:
       - node.name=es01
       - discovery.type=single-node
       - xpack.security.enabled=true
-      # HTTP en clair (dev) pour éviter les certificats
+      # HTTP en clair (dev)
       - xpack.security.http.ssl.enabled=false
       # Transport en clair (OK pour single-node en dev)
       - xpack.security.transport.ssl.enabled=false
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
       - ES_JAVA_OPTS=${ES_JAVA_OPTS}
+      # (facultatif dev) baisser les watermarks disque si peu d'espace :
+      # - cluster.routing.allocation.disk.watermark.low=95%
+      # - cluster.routing.allocation.disk.watermark.high=97%
+      # - cluster.routing.allocation.disk.watermark.flood_stage=98%
     ports:
       - "9200:9200"
     volumes:
@@ -55,10 +79,9 @@ services:
       - SERVER_NAME=kibana
       - SERVER_HOST=0.0.0.0
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      # Connexion directe avec l'admin "elastic" (simple pour dev)
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
-      # Clés d’encryption (obligatoires pour certaines features)
+      # ✅ Utiliser un Service Account Token (sera injecté depuis .env)
+      - ELASTICSEARCH_SERVICEACCOUNTTOKEN=${ELASTICSEARCH_SERVICEACCOUNTTOKEN}
+      # Clés d’encryption (fortement recommandé)
       - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY1}
       - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY2}
       - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY3}
@@ -74,225 +97,119 @@ volumes:
   es-data:
 ```
 
-> Pourquoi **sans TLS** : en dev/local, ça supprime les problèmes de certificats. La sécurité (auth) reste activée.
-> En prod, activez TLS (http + transport) et n’utilisez pas le compte `elastic` dans Kibana.
-
-# 3) Démarrage
-
-```bash
-docker compose up -d
-docker compose ps
-# Attendre "healthy" sur les 2 services :
-docker compose logs -f
-```
+> Pourquoi **sans TLS** : en dev/local, ça supprime les soucis de certificats.
+> En prod, activez TLS et n’utilisez pas de variables en clair.
 
 ---
 
-# 4) URLs
+# 4) **Auto-setup** : démarrer ES → créer le token → relancer Kibana
+
+Collez ce bloc (il fait tout) :
+
+```bash
+# 4.1 Démarre Elasticsearch seul
+docker compose up -d elasticsearch
+echo "Attente qu'Elasticsearch soit healthy…"
+until [ "$(docker inspect -f '{{.State.Health.Status}}' es01)" = "healthy" ]; do sleep 2; done
+
+# 4.2 Crée un service token pour Kibana et l'ajoute à .env
+TOKEN=$(docker exec -it es01 bash -lc "/usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/kibana kibana-token" | awk -F'= ' '/= /{print $2}' | tr -d '\r')
+if ! grep -q '^ELASTICSEARCH_SERVICEACCOUNTTOKEN=' .env; then
+  echo "ELASTICSEARCH_SERVICEACCOUNTTOKEN=$TOKEN" >> .env
+else
+  sed -i "s|^ELASTICSEARCH_SERVICEACCOUNTTOKEN=.*|ELASTICSEARCH_SERVICEACCOUNTTOKEN=$TOKEN|" .env
+fi
+echo "Token injecté dans .env"
+
+# 4.3 Démarre Kibana avec le token
+docker compose up -d kibana
+docker compose ps
+docker compose logs -f kibana
+```
+
+Si le port **5601** est déjà pris, change le mapping en `"5602:5601"` dans `docker-compose.yml`, puis relance `docker compose up -d kibana` et utilise `http://localhost:5602`.
+
+---
+
+# 5) URLs
 
 * Elasticsearch : `http://localhost:9200`
-* Kibana : `http://localhost:5601`
-  Identifiants : `elastic` / **${ELASTIC_PASSWORD}** (défini dans `.env`)
+* Kibana : `http://localhost:5601` (ou `5602` si tu as changé)
+
+**Identifiants pour ES (API/cURL) :** `elastic` / **${ELASTIC_PASSWORD}**
+
+> Le **token** est pour **Kibana** → ne l’utilise pas dans le navigateur/cURL pour ES.
 
 ---
 
-# 5) Cheat-sheet des commandes (version Docker/dev, **auth obligatoire**, **HTTP**)
+# 6) Cheat-sheet cURL (auth requise, HTTP)
 
-> Remplacez `<nom_index>`, `<id>`, `<champ>`, `<valeur>`.
-> Utilise le mot de passe défini dans `.env` (ici `changeme123!`).
-
-### 1) Infos cluster
+> Remplace `<nom_index>`, `<id>`, `<champ>`, `<valeur>`.
+> Mot de passe = valeur de `ELASTIC_PASSWORD` (ici `changeme123!`).
 
 ```bash
+# 1) Infos cluster
 curl -u elastic:changeme123! http://localhost:9200/
-```
 
-### 2) Lister les indices
-
-```bash
+# 2) Lister les indices
 curl -u elastic:changeme123! "http://localhost:9200/_cat/indices?v"
-```
 
-### 3) État des nœuds
-
-```bash
+# 3) État des nœuds
 curl -u elastic:changeme123! "http://localhost:9200/_cat/nodes?v"
-```
 
-### 4) Statistiques des indices (tous)
-
-```bash
+# 4) Stats indices
 curl -u elastic:changeme123! "http://localhost:9200/_stats"
-```
 
-### 5) Rechercher dans un index
-
-```bash
+# 5) Recherche simple
 curl -u elastic:changeme123! "http://localhost:9200/<nom_index>/_search?q=<champ>:<valeur>"
-```
 
-### 6) Mapping d’un index
-
-```bash
+# 6) Mapping
 curl -u elastic:changeme123! "http://localhost:9200/<nom_index>/_mapping"
-```
 
-### 7) Ajouter / indexer un document (ID fixé)
-
-```bash
+# 7) Indexer un document (ID fixé)
 curl -u elastic:changeme123! -X PUT "http://localhost:9200/<nom_index>/_doc/<id>" \
   -H 'Content-Type: application/json' -d '{"<champ>":"<valeur>"}'
-```
 
-*(Variante ID auto : `POST http://localhost:9200/<nom_index>/_doc`)*
-
-### 8) Mettre à jour partiellement un document
-
-```bash
+# 8) Mise à jour partielle
 curl -u elastic:changeme123! -X POST "http://localhost:9200/<nom_index>/_update/<id>" \
   -H 'Content-Type: application/json' -d '{"doc":{"<champ>":"<nouvelle_valeur>"}}'
-```
 
-### 9) Supprimer un document
+# 9) Supprimer un doc
+curl -u elastic:changeme123! -X DELETE "http://localhost:9200/<nom_index>/_doc/<id)"
 
-```bash
-curl -u elastic:changeme123! -X DELETE "http://localhost:9200/<nom_index>/_doc/<id>"
-```
-
-### 10) Supprimer un index
-
-```bash
+# 10) Supprimer un index
 curl -u elastic:changeme123! -X DELETE "http://localhost:9200/<nom_index>"
 ```
 
 ---
 
-## (Optionnel) Utiliser un **Service Account Token** dans Kibana (au lieu de `elastic`)
+## Dépannage express
 
-Si vous préférez que Kibana se connecte via un **token** (pratique, scope limité) :
+* **Kibana refuse de démarrer avec `elastic`**
+  → c’est normal en 8.19 : **utilise le Service Account Token**, comme ci-dessus.
 
-1. Après que **ES est healthy**, créez un token dans le conteneur ES :
+* **5601 déjà occupé**
 
-```bash
-docker exec -it es01 bash -lc "/usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/kibana kibana-token"
-# Notez la longue valeur retournée après le '='
-```
+  ```bash
+  sudo ss -ltnp | grep :5601 || echo "libre"
+  # soit tue le process, soit mappe "5602:5601"
+  ```
 
-2. Appliquez-le à Kibana (en remplaçant le mot de passe) :
+* **Alerte “flood stage disk watermark 95%” (indices en read-only)**
+  Libère de l’espace. En dev, tu peux temporairement :
 
-```bash
-docker compose down
-# Ajoutez dans docker-compose.yml, service kibana -> environment :
-#   - ELASTICSEARCH_SERVICEACCOUNTTOKEN=<LE_TOKEN>
-#   (et supprimez ELASTICSEARCH_USERNAME/ELASTICSEARCH_PASSWORD)
-# Exemple :
-#   - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-#   - ELASTICSEARCH_SERVICEACCOUNTTOKEN=AAEAAWVsYXN0aWMv...
-docker compose up -d
-```
+  ```bash
+  curl -u elastic:changeme123! -X PUT "http://localhost:9200/_cluster/settings" \
+    -H 'Content-Type: application/json' -d '{"transient":{"cluster.routing.allocation.disk.threshold_enabled":false}}'
 
-> Avec Kibana 8.x, la variable d’env **ELASTICSEARCH_SERVICEACCOUNTTOKEN** est supportée.
-> En prod, laissez TLS activé et chargez votre CA, mais pour ce tuto dev on reste en HTTP.
+  curl -u elastic:changeme123! -X PUT "http://localhost:9200/_all/_settings" \
+    -H 'Content-Type: application/json' -d '{"index.blocks.read_only_allow_delete": null}'
+  ```
 
----
+* **Changer le port Kibana** → dans `docker-compose.yml` :
 
-## Maintenance rapide
-
-### Logs live
-
-```bash
-docker compose logs -f elasticsearch
-docker compose logs -f kibana
-```
-
-### Redémarrer
-
-```bash
-docker compose restart elasticsearch kibana
-```
-
-### Arrêter / supprimer
-
-```bash
-docker compose down     # stoppe et garde les volumes (données)
-docker compose down -v  # supprime aussi les volumes (réinitialise tout)
-```
-
----
-
-### FAQ ultra-courte
-
-* **Kibana n’est pas “available”** : attendez que `elasticsearch` soit `healthy`.
-* **401 sur ES** : c’est normal sans `-u`. Ajoutez `-u elastic:…`.
-* **Indices rouges** : voir `/_cluster/health?pretty` et `/_cat/indices?v`.
-* **Peu de RAM** : baissez `ES_JAVA_OPTS` à `-Xms512m -Xmx512m`.
-
-
-
-### Annexe : libèrer **9200/9300 (Elasticsearch)** et **5601 (Kibana)** proprement avant Docker Compose.
-
-## A) Arrêter tout ce qui peut réoccuper les ports (services & conteneurs)
-
-```bash
-# 1) Stopper/empêcher les services système
-sudo systemctl stop elasticsearch kibana 2>/dev/null || true
-sudo systemctl disable elasticsearch kibana 2>/dev/null || true
-sudo systemctl mask elasticsearch kibana 2>/dev/null || true   # évite un redémarrage auto
-
-# 2) Stopper d’éventuels conteneurs existants
-docker ps --format 'table {{.Names}}\t{{.Ports}}'
-docker compose down 2>/dev/null || true
-docker stop $(docker ps -q) 2>/dev/null || true
-```
-
-## B) Trouver qui occupe les ports
-
-```bash
-# Vue rapide
-sudo ss -ltnp | egrep ':(9200|9300|5601)\b' || echo "OK: aucun process trouvé"
-
-# Détail avec lsof (si non installé: sudo apt -y install lsof)
-sudo lsof -iTCP:9200 -sTCP:LISTEN -nP || true
-sudo lsof -iTCP:9300 -sTCP:LISTEN -nP || true
-sudo lsof -iTCP:5601 -sTCP:LISTEN -nP || true
-```
-
-## C) Killer proprement (puis fort si besoin)
-
-```bash
-# 1) Tentative douce
-sudo fuser -k -n tcp 9200 9300 5601 2>/dev/null || true
-
-# 2) Si un PID résiste, kill ciblé (remplacez <PID> par les PIDs vus avec ss/lsof)
-# d’abord TERM (gracieux), puis KILL si nécessaire
-sudo kill <PID> 2>/dev/null || true
-sleep 1
-sudo kill -9 <PID> 2>/dev/null || true
-```
-
-## D) Vérifier que les ports sont libres
-
-```bash
-sudo ss -ltnp | egrep ':(9200|9300|5601)\b' || echo "OK: 9200/9300/5601 sont libres"
-```
-
-## E) (Optionnel) Nettoyages utiles
-
-```bash
-# PIDs orphelins de services
-sudo rm -f /run/elasticsearch/*.pid /run/kibana/kibana.pid 2>/dev/null || true
-
-# Réseau Docker laissé en plan (rarement utile)
-docker network prune -f 2>/dev/null || true
-```
-
----
-
-### Ensuite, tu peux lancer la stack Docker Compose que je t’ai donnée :
-
-```bash
-docker compose up -d
-docker compose logs -f
-```
-
+  ```yaml
+  ports:
+    - "5602:5601"
+  ```
 
