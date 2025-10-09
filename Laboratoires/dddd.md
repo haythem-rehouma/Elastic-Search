@@ -245,49 +245,47 @@ docker run --rm -it -v elk_esdata:/vol alpine sh  # shell pour voir /vol
 Cette partie 1 met en place une base ELK fiable et persistante sur ta VM. À partir de là, tu peux passer à la Partie 2 du TP : création de l’index `news` avec mapping propre, puis ingestion NDJSON via `_bulk`.
 
 
----
+<br/>
+<br/>
 
-# 2) Créer ton fichier **NDJSON** à partir de tes lignes
 
-Tu m’as donné des **lignes JSON** (une par article). Pour `_bulk`, il faut **NDJSON** avec **l’action** avant chaque doc.
 
-### 2.1. Colle ta liste telle quelle dans `raw.jsonl`
+
+
+# 2) Préparer ton dataset et le convertir en NDJSON
+
+### 2.1. Mettre tes lignes JSON brutes dans un fichier
+
+Chaque article sur **une ligne** (JSON valide, UTF-8) :
 
 ```bash
 cd ~/elk-news
 cat > raw.jsonl <<'JSON'
-{"category": "POLITICS", "headline": "Ryan Zinke Looks To Reel Back Some Critics With 'Grand Pivot' To Conservation", "authors": "Chris D'Angelo", "link": "https://www.huffingtonpost.com/entry/ryan-zinke-reel-back-critics-grand-pivot-conservation_us_5b086c78e4b0fdb2aa538b3f", "short_description": "The interior secretary attempts damage control with hunting and fishing groups that didn\u2019t like his fossil fuel focus.", "date": "2018-05-26"}
-{"category": "POLITICS", "headline": "Trump's Scottish Golf Resort Pays Women Significantly Less Than Men: Report", "authors": "Mary Papenfuss", "link": "https://www.huffingtonpost.com/entry/trump-scottish-golf-resort-pays-women-less-than-men_us_5b08ca29e4b0802d69cb4d37", "short_description": "And there are four times as many male as female executives.", "date": "2018-05-26"}
-{"category": "WEIRD NEWS", "headline": "Weird Father's Day Gifts Your Dad Doesn't Know He Wants (But He Does)", "authors": "David Moye", "link": "https://www.huffingtonpost.com/entry/weird-fathers-day-gifts-2018_us_5b05bf18e4b05f0fc84438f6", "short_description": "Why buy a boring tie when you can give him testicle plush toys?", "date": "2018-05-26"}
-{"category": "ENTERTAINMENT", "headline": "Twitter #PutStarWarsInOtherFilms And It Was Universally Entertaining", "authors": "Andy McDonald", "link": "https://www.huffingtonpost.com/entry/twitter-put-star-wars-in-other-films_us_5b098875e4b0568a880be92c", "short_description": "There's no such thing as too much \"Star Wars.\"", "date": "2018-05-26"}
-{"category": "WEIRD NEWS", "headline": "Mystery 'Wolf-Like' Animal Reportedly Shot In Montana, Baffles Wildlife Officials", "authors": "Hilary Hanson", "link": "https://www.huffingtonpost.com/entry/montana-wolf-like-animal-mystery_us_5b04533de4b003dc7e4708af", "short_description": "\u201cWe have no idea what this was until we get a DNA report back.\"", "date": "2018-05-26"}
-{"category": "WORLD NEWS", "headline": "North Korea Still Open To Talks After Trump Cancels Summit", "authors": "Josh Smith and Christine Kim, Reuters", "link": "https://www.huffingtonpost.com/entry/north-korea-reax-canceled-summit_us_5b07a93de4b0568a8809ccf2", "short_description": "Trump\u2019s announcement came after repeated threats by North Korea to pull out of the summit over what it saw as confrontational remarks by U.S. officials.", "date": "2018-05-25"}
-# ... (colle toutes les lignes que tu m'as envoyées, exactement au même format, une par ligne)
+{"category":"POLITICS","headline":"Ryan Zinke Looks To Reel Back...","authors":"Chris D'Angelo","link":"https://...","short_description":"The interior secretary...","date":"2018-05-26"}
+{"category":"POLITICS","headline":"Trump's Scottish Golf Resort...","authors":"Mary Papenfuss","link":"https://...","short_description":"And there are four times...","date":"2018-05-26"}
+# ... colle toutes tes lignes ici (une par article)
 JSON
 ```
 
-### 2.2. Convertir en **NDJSON pour _bulk**
+### 2.2. Transformer en NDJSON pour `_bulk`
 
-Chaque doc doit être précédé d’une ligne `{"index":{"_index":"news"}}` :
+Le bulk exige **une ligne “action”** avant **chaque document** :
 
 ```bash
-awk 'BEGIN{print ""} {print "{\"index\":{\"_index\":\"news\"}}"; print}' raw.jsonl > news.bulk.ndjson
+awk '{print "{\"index\":{\"_index\":\"news\"}}"; print}' raw.jsonl > news.bulk.ndjson
 wc -l raw.jsonl news.bulk.ndjson
 # news.bulk.ndjson doit avoir 2x plus de lignes (action + source)
 ```
 
----
+Astuce (gros fichier) : compresser
 
-# 3) Créer l’index `news` avec un **mapping propre**
+```bash
+gzip -c news.bulk.ndjson > news.bulk.ndjson.gz
+```
 
-On définit types + analyzers. On garde simple et robuste :
 
-* `date`: type `date` (format `yyyy-MM-dd`)
-* `category`: `keyword` (exact) + `text` (recherche full-text) via sous-champ
-* `authors`: `keyword` + `text`
-* `headline`, `short_description`: `text` (analyzer standard) + sous-champ `keyword`
-* `link`: `keyword`
-* **Option**: un `normalizer` pour `category.keyword_lower`
+
+# 3) Créer l’index `news` avec un mapping propre
 
 ```bash
 curl -s -X PUT 'http://localhost:9200/news' -H 'Content-Type: application/json' -d '{
@@ -301,7 +299,7 @@ curl -s -X PUT 'http://localhost:9200/news' -H 'Content-Type: application/json' 
   },
   "mappings": {
     "properties": {
-      "date":    { "type": "date", "format": "yyyy-MM-dd" },
+      "date": { "type": "date", "format": "yyyy-MM-dd" },
       "category": {
         "type": "text",
         "fields": {
@@ -309,143 +307,240 @@ curl -s -X PUT 'http://localhost:9200/news' -H 'Content-Type: application/json' 
           "keyword_lower": { "type": "keyword", "normalizer": "lowercase_normalizer" }
         }
       },
-      "headline": {
-        "type": "text",
-        "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } }
-      },
-      "authors": {
-        "type": "text",
-        "fields": { "keyword": { "type": "keyword" } }
-      },
-      "short_description": {
-        "type": "text",
-        "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } }
-      },
+      "headline": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+      "authors":  { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+      "short_description": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
       "link": { "type": "keyword" }
     }
   }
 }'
-```
-
-Vérifie :
-
-```bash
 curl -s http://localhost:9200/news | jq '.'
 ```
 
----
 
-# 4) **Ingestion** en masse (Bulk)
+
+# 4) Ingestion — 7 façons différentes
+
+## Méthode A — `curl` (bulk NDJSON classique)
 
 ```bash
-curl -s -H 'Content-Type: application/x-ndjson' -X POST 'http://localhost:9200/_bulk?pretty' --data-binary @news.bulk.ndjson
-# => "errors" doit être false
+curl -s -H 'Content-Type: application/x-ndjson' \
+     -X POST 'http://localhost:9200/_bulk?pretty' \
+     --data-binary @news.bulk.ndjson
+# Vérif
 curl -s 'http://localhost:9200/news/_count?pretty'
 ```
 
-Si `errors: true`, c’est souvent un caractère UTF-8 mal échappé → recolle la ligne fautive.
-(ton JSON est déjà propre; l’escape `\u2019` est OK)
-
----
-
-# 5) Requêtes **de base** (exactes à copier/coller)
-
-> Tu peux faire les mêmes dans **Kibana → Dev Tools → Console**
-
-## 5.1. Voir 5 docs
+### Variante A.1 — avec gzip (plus rapide sur gros fichiers)
 
 ```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+curl -s -H 'Content-Type: application/x-ndjson' \
+     -H 'Content-Encoding: gzip' \
+     -X POST 'http://localhost:9200/_bulk?pretty' \
+     --data-binary @news.bulk.ndjson.gz
+```
+
+## Méthode B — Kibana Dev Tools (colle et envoie)
+
+1. Ouvre Kibana → **Dev Tools** → **Console**.
+2. Crée l’index (bloc du §3).
+3. Dans la Console, exécute :
+
+   ```json
+   POST _bulk
+   {"index":{"_index":"news"}}
+   {"category":"POLITICS","headline":"Ryan Zinke Looks To Reel Back...","authors":"Chris D'Angelo","link":"https://...","short_description":"The interior secretary...","date":"2018-05-26"}
+   {"index":{"_index":"news"}}
+   {"category":"POLITICS","headline":"Trump's Scottish Golf Resort...","authors":"Mary Papenfuss","link":"https://...","short_description":"And there are four times...","date":"2018-05-26"}
+   ```
+
+   Tu peux coller tout le contenu de `news.bulk.ndjson` (attention, **une requête peut être volumineuse**; en cas d’erreur 413, split en plusieurs paquets).
+
+## Méthode C — Python (requests)
+
+```bash
+python3 - <<'PY'
+import requests, sys
+bulk = open('news.bulk.ndjson','rb').read()
+r = requests.post('http://localhost:9200/_bulk',
+                  headers={'Content-Type':'application/x-ndjson'},
+                  data=bulk)
+print(r.status_code, r.text[:500])
+PY
+```
+
+Variante gzip :
+
+```bash
+python3 - <<'PY'
+import requests, gzip
+with open('news.bulk.ndjson.gz','rb') as f:
+    data=f.read()
+r = requests.post('http://localhost:9200/_bulk?pretty',
+                  headers={'Content-Type':'application/x-ndjson','Content-Encoding':'gzip'},
+                  data=data)
+print(r.status_code)
+print(r.text[:500])
+PY
+```
+
+## Méthode D — Node.js (axios ou fetch)
+
+```bash
+node - <<'JS'
+import fs from 'fs';
+import axios from 'axios';
+const data = fs.readFileSync('news.bulk.ndjson');
+const r = await axios.post('http://localhost:9200/_bulk?pretty', data, {
+  headers: {'Content-Type':'application/x-ndjson'}
+});
+console.log(r.status, r.data.items?.length);
+JS
+```
+
+## Méthode E — Logstash (lecture de fichier → ES)
+
+Installe Logstash dans un conteneur dédié (simple pour un test) :
+
+```bash
+mkdir -p ~/elk-news/logstash && cd ~/elk-news/logstash
+cat > pipeline.conf <<'CONF'
+input {
+  file {
+    path => "/data/raw.jsonl"
+    codec => json_lines
+    start_position => "beginning"
+    sincedb_path => "/data/.sincedb"
+  }
+}
+filter { }
+output {
+  elasticsearch {
+    hosts => ["http://elasticsearch:9200"]
+    index => "news"
+  }
+  stdout { codec => dots }
+}
+CONF
+```
+
+Compose minimal à côté d’ELK (même réseau) :
+
+```bash
+cat > docker-compose.logstash.yml <<'YAML'
+services:
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.14.3
+    container_name: ls-news
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ../raw.jsonl:/data/raw.jsonl:ro
+      - ./pipeline.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - lsdata:/data
+    environment:
+      - LS_JAVA_OPTS=-Xms512m -Xmx512m
+    network_mode: "service:elasticsearch"
+volumes:
+  lsdata:
+YAML
+```
+
+Lancer :
+
+```bash
+cd ~/elk-news/logstash
+docker compose -f docker-compose.logstash.yml up
+# Stoppe avec Ctrl+C quand c'est terminé
+```
+
+## Méthode F — `elasticdump` (outil pratique en conteneur)
+
+```bash
+docker run --rm -v "$PWD":/data taskrabbit/elasticsearch-dump \
+  --type=bulk --input=/data/news.bulk.ndjson --output=http://host.docker.internal:9200
+```
+
+Si `host.docker.internal` n’existe pas sur Linux, utilise l’IP de la VM ou `http://172.17.0.1:9200` (selon ta config Docker).
+
+## Méthode G — Split + ingestion parallèle (gros datasets)
+
+```bash
+# Split par paquets de 20 000 lignes (soit 10 000 docs)
+split -l 20000 news.bulk.ndjson parts_
+for f in parts_*; do
+  curl -s -H 'Content-Type: application/x-ndjson' \
+       -X POST 'http://localhost:9200/_bulk' \
+       --data-binary @"$f" >/dev/null &
+done
+wait
+curl -s 'http://localhost:9200/news/_count?pretty'
+```
+
+
+# 5) Contrôles post-ingestion
+
+```bash
+# 5.1. Compter
+curl -s 'http://localhost:9200/news/_count?pretty'
+
+# 5.2. Exemple de recherche
+curl -s -H 'Content-Type: application/json' \
+  'http://localhost:9200/news/_search?pretty' -d '{
   "size": 5,
+  "query": { "match": { "headline": "Trump North Korea" } },
   "_source": ["date","category","headline","authors"]
 }'
+
+# 5.3. Vérifier le mapping
+curl -s 'http://localhost:9200/news/_mapping?pretty'
 ```
 
-## 5.2. `match` (plein texte sur le titre)
 
-```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
-  "query": { "match": { "headline": "Trump summit North Korea" } },
-  "highlight": { "fields": { "headline": {} } },
-  "_source": ["date","category","headline"]
-}'
-```
 
-## 5.3. `match_phrase` (expression exacte)
+## Dépannage ingestion
 
-```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
-  "query": { "match_phrase": { "headline": "President Obama" } },
-  "_source": ["headline","date","category"]
-}'
-```
+* `errors: true` dans la réponse bulk
+  → Une ou plusieurs lignes posent problème (JSON invalide, champ “date” non conforme). Récupère les items en erreur et corrige.
 
-## 5.4. `minimum_should_match` (précision/rappel)
+  ```bash
+  # Voir les erreurs rapidement
+  curl -s -H 'Content-Type: application/x-ndjson' \
+       -X POST 'http://localhost:9200/_bulk' \
+       --data-binary @news.bulk.ndjson \
+  | jq '.items[] | select(.index.error != null) | .index.error'
+  ```
 
-```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
-  "query": {
-    "match": {
-      "headline": {
-        "query": "obama trump clinton",
-        "minimum_should_match": 2
-      }
-    }
-  },
-  "_source": ["headline","date","category"]
-}'
-```
+* Date non parsée
+  → Ton mapping attend `yyyy-MM-dd`. Vérifie la colonne `date`.
+  Option : autoriser plusieurs formats : `"format":"yyyy-MM-dd||strict_date_optional_time"`.
 
-## 5.5. `multi_match` (plusieurs champs)
+* Payload trop gros (413)
+  → Utilise gzip (Méthode A.1) ou **split** (Méthode G).
 
-```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
-  "query": {
-    "multi_match": {
-      "query": "President Obama",
-      "fields": ["headline^2","short_description","authors"]
-    }
-  },
-  "_source": ["headline","authors","date","category"]
-}'
-```
+* Timeouts
+  → Ingest en paquets plus petits, ou ajoute `?timeout=2m` au bulk.
 
-## 5.6. `range` sur la date (2018-05-24 → 2018-05-26)
 
-```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
-  "query": {
-    "range": {
-      "date": { "gte": "2018-05-24", "lte": "2018-05-26" }
-    }
-  },
-  "sort": [{ "date": "asc" }],
-  "_source": ["date","category","headline"]
-}'
-```
 
-## 5.7. `bool` (combiner must + must_not + filter)
 
-```bash
-curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
-  "query": {
-    "bool": {
-      "must": [
-        { "match_phrase": { "headline": "President Obama" } }
-      ],
-      "must_not": [
-        { "match": { "category": "SPORTS" } }
-      ],
-      "filter": [
-        { "range": { "date": { "gte": "2018-05-24", "lte": "2018-05-26" } } }
-      ]
-    }
-  },
-  "_source": ["date","category","headline"]
-}'
-```
 
----
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # 6) **Agrégations** puissantes
 
