@@ -19,7 +19,7 @@ Pré-requis : Docker/Compose, `curl` (et idéalement `jq`), 3 Go RAM libres, por
 <br/>
 <br/>
 
-# 0) Pré-requis rapides (Annexe 0)
+# Partie 0 - Pré-requis rapides (Annexe 0)
 
 * Docker et Docker Compose installés
   Vérifier : `docker --version` et `docker compose version`
@@ -252,7 +252,7 @@ Cette partie 1 met en place une base ELK fiable et persistante sur ta VM. À par
 
 
 
-# 2) Préparer ton dataset et le convertir en NDJSON
+# Partie 2 - Préparer ton dataset et le convertir en NDJSON
 
 ### 2.1. Mettre tes lignes JSON brutes dans un fichier
 
@@ -283,9 +283,10 @@ Astuce (gros fichier) : compresser
 gzip -c news.bulk.ndjson > news.bulk.ndjson.gz
 ```
 
+<br/>
+<br/>
 
-
-# 3) Créer l’index `news` avec un mapping propre
+# Partie 3 - Créer l’index `news` avec un mapping propre
 
 ```bash
 curl -s -X PUT 'http://localhost:9200/news' -H 'Content-Type: application/json' -d '{
@@ -317,9 +318,10 @@ curl -s -X PUT 'http://localhost:9200/news' -H 'Content-Type: application/json' 
 curl -s http://localhost:9200/news | jq '.'
 ```
 
+<br/>
+<br/>
 
-
-# 4) Ingestion — 7 façons différentes
+# Partie 4 - Ingestion — 7 façons différentes (Annexe 1)
 
 ## Méthode A — `curl` (bulk NDJSON classique)
 
@@ -478,7 +480,13 @@ curl -s 'http://localhost:9200/news/_count?pretty'
 ```
 
 
-# 5) Contrôles post-ingestion
+<br/>
+<br/>
+
+
+# Partie 5 - Contrôles post-ingestion - Requêtes (Annexe 1)
+
+
 
 ```bash
 # 5.1. Compter
@@ -524,6 +532,672 @@ curl -s 'http://localhost:9200/news/_mapping?pretty'
 
 
 
+> Remarque générale
+>
+> * Ajoute `?pretty` pour une lecture confortable.
+> * Quand tu explores, limite le bruit: `"size": 5`, `"_source": [...]`.
+> * Pour chaque exemple, tu peux exécuter la version `curl` (CLI) ou coller le JSON dans Kibana Console.
+
+## 5.A — Lecture de base / pagination
+
+### A.1. Parcourir quelques docs
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=5&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "_source": ["date","category","headline","authors"]
+}'
+```
+
+### A.2. Trier par date descendante
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=5&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "sort": [{ "date": "desc" }],
+  "_source": ["date","category","headline"]
+}'
+```
+
+### A.3. Pagination classique `from/size`
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "from": 10, "size": 10,
+  "sort": [{ "date": "desc" }]
+}'
+```
+
+### A.4. Pagination scalable `search_after` (recommandée)
+
+1. Première page:
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=5&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "sort": [{ "date": "desc" }, {"_id":"desc"}],
+  "_source": ["date","headline"]
+}'
+```
+
+2. Récupère les `sort` du dernier hit, puis:
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=5&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "search_after": ["2018-05-24","<ID_DERNIER_HIT>"],
+  "sort": [{ "date": "desc" }, {"_id":"desc"}],
+  "_source": ["date","headline"]
+}'
+```
+
+
+
+## 5.B — Full-text: match, phrase, multi-champs, tolérance
+
+### B.1. `match` (analyse linguistique)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": { "match": { "headline": "Trump summit North Korea" } },
+  "_source": ["headline","date","category"]
+}'
+```
+
+### B.2. `match_phrase` (expression exacte)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": { "match_phrase": { "headline": "President Obama" } },
+  "_source": ["headline","date","category"]
+}'
+```
+
+### B.3. `minimum_should_match` (contrôler la précision)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": {
+    "match": {
+      "headline": {
+        "query": "obama trump clinton",
+        "minimum_should_match": 2
+      }
+    }
+  },
+  "_source": ["headline","date","category"]
+}'
+```
+
+### B.4. `multi_match` sur plusieurs champs (pondération)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": {
+    "multi_match": {
+      "query": "President Obama",
+      "fields": ["headline^3","short_description","authors"]
+    }
+  },
+  "_source": ["headline","authors","date","category"]
+}'
+```
+
+### B.5. Fuzzy (tolérance aux fautes)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": {
+    "match": {
+      "headline": {
+        "query": "presdent obmaa",
+        "fuzziness": "AUTO"
+      }
+    }
+  }
+}'
+```
+
+### B.6. `query_string` (syntaxe lucene: AND, OR, guillemets, wildcards)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": {
+    "query_string": {
+      "query": "\"North Korea\" AND Trump",
+      "fields": ["headline","short_description"]
+    }
+  },
+  "_source": ["headline","date"]
+}'
+```
+
+### B.7. `simple_query_string` (plus permissif, pas d’erreur sur opérateurs)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": {
+    "simple_query_string": {
+      "query": "\"North Korea\" +Trump -Clinton",
+      "fields": ["headline^2","short_description"]
+    }
+  }
+}'
+```
+
+
+## 5.C — Exact match / keywords / préfixes
+
+### C.1. `term` exact (sur sous-champ keyword)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": { "term": { "category.keyword": "POLITICS" } },
+  "_source": ["category","headline","date"]
+}'
+```
+
+### C.2. `terms` (liste)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": { "terms": { "category.keyword": ["POLITICS","WORLD NEWS"] } },
+  "_source": ["category","headline","date"]
+}'
+```
+
+### C.3. `prefix` (sur keyword; utile pour autocomplétions simples)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": { "prefix": { "authors.keyword": "Mary" } },
+  "_source": ["authors","headline"]
+}'
+```
+
+### C.4. `wildcard` et `regexp` (à utiliser avec parcimonie)
+
+```bash
+# wildcard (peut être coûteux)
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": { "wildcard": { "headline.keyword": "*Trump*" } },
+  "_source": ["headline","date"]
+}'
+# regexp
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": { "regexp": { "authors.keyword": "M.*y.*" } },
+  "_source": ["authors","headline"]
+}'
+```
+
+
+
+## 5.D — Bool, filtres, ranges, boosting
+
+### D.1. Combiner conditions
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "_source": ["date","category","headline"],
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "headline": "Trump" } }
+      ],
+      "filter": [
+        { "terms": { "category.keyword": ["POLITICS","WORLD NEWS"] } },
+        { "range": { "date": { "gte": "2018-05-24","lte": "2018-05-26" } } }
+      ],
+      "must_not": [
+        { "match_phrase": { "short_description": "joke" } }
+      ]
+    }
+  }
+}'
+```
+
+### D.2. `boost` par champ/filtre (function_score simple)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "query": {
+    "function_score": {
+      "query": { "match": { "headline": "Trump" } },
+      "boost_mode": "multiply",
+      "score_mode": "sum",
+      "functions": [
+        { "filter": { "term": { "category.keyword": "POLITICS" } }, "weight": 2.0 }
+      ]
+    }
+  },
+  "_source": ["headline","category","_score"]
+}'
+```
+
+
+
+## 5.E — Highlight (surlignage)
+
+### E.1. Surligner dans le titre et la description
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' -H 'Content-Type: application/json' -d '{
+  "_source": ["headline","short_description","date"],
+  "query": { "match": { "short_description": "North Korea summit" } },
+  "highlight": {
+    "fields": {
+      "headline": {},
+      "short_description": {}
+    },
+    "pre_tags": ["<mark>"], "post_tags": ["</mark>"]
+  }
+}'
+```
+
+
+
+## 5.F — Agrégations (KPIs, facettes, stats)
+
+### F.1. Compte par catégorie (`terms`)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "by_category": { "terms": { "field": "category.keyword", "size": 20 } }
+  }
+}'
+```
+
+### F.2. Histogramme par jour (`date_histogram`) + sous-agg `terms`
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "per_day": {
+      "date_histogram": { "field": "date", "calendar_interval": "day" },
+      "aggs": {
+        "by_cat": { "terms": { "field": "category.keyword", "size": 5 } }
+      }
+    }
+  }
+}'
+```
+
+### F.3. `top_hits` (ex: dernier titre par catégorie)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "by_category": {
+      "terms": { "field": "category.keyword", "size": 10 },
+      "aggs": {
+        "latest": {
+          "top_hits": {
+            "size": 1,
+            "sort": [{ "date": "desc" }],
+            "_source": ["date","headline","authors"]
+          }
+        }
+      }
+    }
+  }
+}'
+```
+
+### F.4. Statistiques cardinalité (nb d’auteurs distincts)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "authors_count": { "cardinality": { "field": "authors.keyword" } }
+  }
+}'
+```
+
+### F.5. Percentiles (longueur titre, si tu stockes un champ numérique dérivé)
+
+> Si tu ajoutes plus tard un champ `headline_len` (entier).
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "p_headline": { "percentiles": { "field": "headline_len", "percents": [50,90,95,99] } }
+  }
+}'
+```
+
+### F.6. `significant_text` (mots “significatifs” pour un filtre donné)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "query": { "term": { "category.keyword": "POLITICS" } },
+  "aggs": {
+    "sig_terms": {
+      "significant_text": {
+        "field": "short_description",
+        "size": 10
+      }
+    }
+  }
+}'
+```
+
+### F.7. `rare_terms` (trouver des catégories rares – utile sur gros corpus)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "rare_cats": {
+      "rare_terms": { "field": "category.keyword", "max_doc_count": 2 }
+    }
+  }
+}'
+```
+
+### F.8. Pipelines (ex: moyenne mobile sur un histogramme)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "per_day": {
+      "date_histogram": { "field": "date", "calendar_interval": "day" }
+    },
+    "moving_avg": {
+      "moving_fn": {
+        "buckets_path": "per_day._count",
+        "window": 2,
+        "script": "MovingFunctions.unweightedAvg(values)"
+      }
+    }
+  }
+}'
+```
+
+### F.9. `bucket_sort` (trier/limiter côté agg)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "cats": {
+      "terms": { "field": "category.keyword", "size": 100 },
+      "aggs": {
+        "by_day": { "date_histogram": { "field": "date", "calendar_interval": "day" } },
+        "limit": { "bucket_sort": { "size": 5 } }
+      }
+    }
+  }
+}'
+```
+
+### F.10. `composite` (pagination d’aggregations)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "cats": {
+      "composite": {
+        "size": 5,
+        "sources": [
+          { "cat": { "terms": { "field": "category.keyword" } } }
+        ]
+      }
+    }
+  }
+}'
+```
+
+Ensuite, réutilise `after_key` de la réponse pour la page suivante:
+
+```json
+"aggs": {
+  "cats": {
+    "composite": {
+      "size": 5,
+      "after": { "cat": "ENTERTAINMENT" },
+      "sources": [{ "cat": { "terms": { "field": "category.keyword" } } }]
+    }
+  }
+}
+```
+
+
+
+## 5.G — Diversification des résultats
+
+### G.1. `field_collapse` (éviter doublons par auteur, garder le plus récent)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": { "match": { "headline": "Trump" } },
+  "collapse": {
+    "field": "authors.keyword",
+    "inner_hits": {
+      "name": "by_author_latest",
+      "size": 1,
+      "sort": [{ "date": "desc" }]
+    }
+  },
+  "sort": [{ "date": "desc" }],
+  "_source": ["authors","headline","date"]
+}'
+```
+
+### G.2. `sampler` (échantillonnage rapide avant agg)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "sample": {
+      "sampler": { "shard_size": 100 },
+      "aggs": {
+        "cats": { "terms": { "field": "category.keyword", "size": 10 } }
+      }
+    }
+  }
+}'
+```
+
+
+
+## 5.H — Suggester / Autocomplétion
+
+> Nécessite un champ `completion` si tu veux un vrai suggest. Variante simple: prefix/wildcard sur `headline.keyword`.
+
+### H.1. Autocomplete simple (prefix)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=10&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": { "prefix": { "headline.keyword": "Harvey" } },
+  "_source": ["headline"]
+}'
+```
+
+### H.2. Suggesteur orthographique (term suggester)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "suggest": {
+    "typos": {
+      "text": "Presdent Obmaa",
+      "term": { "field": "headline" }
+    }
+  }
+}'
+```
+
+### H.3. Phrase suggester (contextuel)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "suggest": {
+    "p": {
+      "text": "North Koria summit",
+      "phrase": {
+        "field": "short_description",
+        "max_errors": 2
+      }
+    }
+  }
+}'
+```
+
+> Pour un **vrai autocomplete UX**, ajoute un champ `headline_suggest` de type `completion` au mapping, réindexe, puis:
+
+```json
+"suggest": {
+  "headline_auto": {
+    "prefix": "Har",
+    "completion": { "field": "headline_suggest", "size": 10 }
+  }
+}
+```
+
+
+
+## 5.I — Analyseurs FR/EN (option bonus)
+
+> Si tu veux de meilleurs résultats multilingues: définis des sous-champs avec analyzers spécifiques.
+
+### I.1. Exemple de mapping (à appliquer avant ingestion)
+
+```json
+"mappings": {
+  "properties": {
+    "headline": {
+      "type": "text",
+      "fields": {
+        "fr": { "type": "text", "analyzer": "french" },
+        "en": { "type": "text", "analyzer": "english" },
+        "keyword": { "type": "keyword", "ignore_above": 256 }
+      }
+    }
+  }
+}
+```
+
+### I.2. Requête langue ciblée
+
+```bash
+curl -s 'http://localhost:9200/news/_search?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "query": { "match": { "headline.en": "election interference" } },
+  "_source": ["headline","date"]
+}'
+```
+
+
+
+## 5.J — Contrôle d’indexation / rafraîchissement
+
+### J.1. Forcer un refresh (tests rapides)
+
+```bash
+curl -s -X POST 'http://localhost:9200/news/_refresh?pretty'
+```
+
+### J.2. Récupérer uniquement `_source` (par ID)
+
+```bash
+# suppose que tu connais l'ID
+curl -s 'http://localhost:9200/news/_source/<ID>?pretty'
+```
+
+
+
+## 5.K — Mises à jour / réindexations (utile en TP avancé)
+
+### K.1. `_update_by_query` (ex: normaliser catégorie)
+
+```bash
+curl -s -X POST 'http://localhost:9200/news/_update_by_query?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "script": {
+    "source": "ctx._source.category = ctx._source.category.toUpperCase();",
+    "lang": "painless"
+  },
+  "query": { "match_all": {} }
+}'
+```
+
+### K.2. `_reindex` (copier dans un nouvel index avec nouveau mapping)
+
+```bash
+curl -s -X POST 'http://localhost:9200/_reindex?pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "source": { "index": "news" },
+  "dest":   { "index": "news_v2" }
+}'
+```
+
+
+
+## 5.L — Sélections utiles pour Kibana
+
+### L.1. Top 10 catégories
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": { "cats": { "terms": { "field": "category.keyword", "size": 10 } } }
+}'
+```
+
+### L.2. Courbe d’articles par jour
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": { "per_day": { "date_histogram": { "field": "date", "calendar_interval": "day" } } }
+}'
+```
+
+### L.3. Derniers titres par catégorie (pour table “Top N”)
+
+```bash
+curl -s 'http://localhost:9200/news/_search?size=0&pretty' \
+  -H 'Content-Type: application/json' -d '{
+  "aggs": {
+    "by_category": {
+      "terms": { "field": "category.keyword", "size": 10 },
+      "aggs": {
+        "latest": {
+          "top_hits": {
+            "size": 3,
+            "sort": [{ "date": "desc" }],
+            "_source": ["date","headline","authors","link"]
+          }
+        }
+      }
+    }
+  }
+}'
+```
+
+
+
+### Récap express
+
+* **Recherche**: `match`, `match_phrase`, `multi_match`, `query_string`, `fuzzy`.
+* **Filtres**: `term/terms`, `range`, `bool`.
+* **Classement**: `sort`, `function_score`, `collapse`.
+* **Surlignage**: `highlight`.
+* **Facettes/KPIs**: `terms`, `date_histogram`, `top_hits`, `cardinality`, `percentiles`, `significant_text`, `rare_terms`, pipelines (`moving_fn`, `bucket_sort`, `composite`).
+* **Suggester**: `term`, `phrase`, completion (si champ dédié).
+* **Bonus**: analyzers FR/EN, `search_after`, refresh, `_update_by_query`, `_reindex`.
 
 
 
@@ -538,6 +1212,20 @@ curl -s 'http://localhost:9200/news/_mapping?pretty'
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+<br/>
+<br/>
 
 
 
@@ -879,3 +1567,354 @@ docker compose up -d
 
 Et tu accéderas via `http://localhost:19200` (ES) et `http://localhost:15601` (Kibana).
 
+
+
+<br/>
+<br/>
+
+
+
+
+
+# ANNEXE 1 — Importer des **données volumineuses** dans Elasticsearch
+
+## 0) Préparer l’index pour un gros chargement (accélération)
+
+Avant de charger des millions de lignes NDJSON :
+
+```bash
+# 0.1 Désactiver/relaxer le refresh & les replicas pendant l’import
+curl -s -X PUT 'http://localhost:9200/news/_settings' -H 'Content-Type: application/json' -d '{
+  "index": {
+    "number_of_replicas": 0,
+    "refresh_interval": "-1"      # pas de refresh pendant l’import
+  }
+}'
+```
+
+Après l’import, **remets des valeurs normales** :
+
+```bash
+curl -s -X PUT 'http://localhost:9200/news/_settings' -H 'Content-Type: application/json' -d '{
+  "index": {
+    "number_of_replicas": 1,
+    "refresh_interval": "1s"
+  }
+}'
+curl -s -X POST 'http://localhost:9200/news/_refresh'
+```
+
+Rappels pratiques :
+
+* **Taille des bulk** : vise ~5–15 Mo par requête, 1k à 5k actions (paires action+source) par fichier.
+* **Limite HTTP** par défaut ≈ 100 Mo (`http.max_content_length`). Reste bien en dessous.
+
+
+
+## 1.1) Méthode 1 — **Découper** ton NDJSON puis charger en série (robuste, simple)
+
+Supposons ton gros fichier `news.bulk.ndjson` (déjà formaté en `_bulk` : ligne action, puis ligne source).
+
+```bash
+# 1.1 Découper en morceaux de 5 000 lignes (≈ 2 500 docs bulk)
+mkdir -p chunks
+split -l 5000 --numeric-suffixes=1 --additional-suffix=.ndjson news.bulk.ndjson chunks/part_
+
+# 1.2 Import séquentiel
+for f in chunks/part_*; do
+  echo "Import: $f"
+  curl -s -H 'Content-Type: application/x-ndjson' \
+       -X POST 'http://localhost:9200/_bulk' \
+       --data-binary @"$f" | jq '.errors' || true
+done
+
+# 1.3 Vérifier le décompte
+curl -s 'http://localhost:9200/news/_count?pretty'
+```
+
+Astuce : si tu n’as **pas** mis l’action dans le NDJSON, ajoute-la avant (transforme `raw.jsonl` → `news.bulk.ndjson` comme montré plus haut).
+
+
+
+## 1.2) Méthode 2 — **GZIP streaming** (plus rapide, moins d’I/O)
+
+Elasticsearch accepte le gzip si tu indiques l’entête.
+
+```bash
+# 2.1 En direct (sans fichiers intermédiaires)
+gzip -c news.bulk.ndjson | \
+curl -s -H 'Content-Type: application/x-ndjson' \
+       -H 'Content-Encoding: gzip' \
+       -X POST 'http://localhost:9200/_bulk?pretty' \
+       --data-binary @-
+
+# 2.2 Ou chunk + gzip
+for f in chunks/part_*; do
+  gzip -c "$f" | curl -s \
+    -H 'Content-Type: application/x-ndjson' \
+    -H 'Content-Encoding: gzip' \
+    -X POST 'http://localhost:9200/_bulk' \
+    --data-binary @- | jq '.errors'
+done
+```
+
+
+
+## 1.3) Méthode 3 — **Paralléliser** prudemment (GNU parallel)
+
+Convient si ta VM a des cœurs CPU libres. Commence modeste (2 jobs), surveille les erreurs/latences, ajuste.
+
+```bash
+# Installer parallel si besoin
+sudo apt-get update && sudo apt-get install -y parallel
+
+ls chunks/part_* | parallel -j2 '
+  echo "Bulk {}";
+  curl -s -H "Content-Type: application/x-ndjson" -X POST "http://localhost:9200/_bulk" --data-binary @{} \
+  | jq -r ".errors"
+'
+```
+
+Règle d’or : si tu vois `429 Too Many Requests` ou des temps de réponse qui grimpent, **réduis `-j`** et/ou **réduis la taille des chunks**.
+
+
+
+## 1.4) Méthode 4 — **Python (elasticsearch-py) streaming** avec helpers `bulk`
+
+Idéal pour transformer à la volée, gérer les erreurs, re-tenter, etc.
+
+```bash
+# 4.1 Installer
+pip install elasticsearch==8.* tqdm
+
+# 4.2 Script import_bulk.py
+cat > import_bulk.py <<'PY'
+from elasticsearch import Elasticsearch, helpers
+from tqdm import tqdm
+import json, sys
+
+ES = Elasticsearch("http://localhost:9200")
+INDEX = "news"
+
+def gen_actions(path):
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            doc = json.loads(line)
+            # adapte si ton fichier n'a PAS les lignes "action"
+            # ici: on part d'un "raw.jsonl" (1 doc/ligne) et on crée l'action Python
+            yield {
+                "_index": INDEX,
+                "_source": doc
+            }
+
+if __name__ == "__main__":
+    # Exemple 1: importer raw.jsonl (sans lignes action)
+    # actions = gen_actions("raw.jsonl")
+
+    # Exemple 2: si tu as déjà un NDJSON "action+source" (news.bulk.ndjson),
+    #            passe plutôt par une pré-lecture pour ignorer les lignes "action"
+    #            et ne garder que les sources, ou lis le raw.jsonl.
+
+    actions = gen_actions("raw.jsonl")
+    # chunk_size ~ 1000–5000
+    helpers.bulk(ES, actions, chunk_size=2000, request_timeout=120)
+PY
+
+# 4.3 Lancer
+python3 import_bulk.py
+```
+
+Variantes :
+
+* Si tu **dois** lire `news.bulk.ndjson` (action+source), parse une ligne sur deux et ne construis que `_source`.
+* Utilise `tqdm` pour une barre de progression sur un fichier découpé; sinon, ajoute un compteur.
+
+
+## 1.5) Méthode 5 — **Node.js** (client officiel, flux)
+
+```bash
+# 5.1 Installer
+npm init -y
+npm install @elastic/elasticsearch@8 p-limit
+
+# 5.2 Script import_bulk.mjs
+cat > import_bulk.mjs <<'JS'
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
+import { Client } from '@elastic/elasticsearch';
+
+const client = new Client({ node: 'http://localhost:9200' });
+const INDEX = 'news';
+
+async function runRawJsonl(path) {
+  const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
+  const ops = [];
+  for await (const line of rl) {
+    const doc = JSON.parse(line);
+    ops.push({ index: { _index: INDEX } });
+    ops.push(doc);
+    if (ops.length >= 2000 * 2) {                 // 2000 docs
+      await client.bulk({ operations: ops });
+      ops.length = 0;
+    }
+  }
+  if (ops.length) await client.bulk({ operations: ops });
+}
+
+await runRawJsonl('raw.jsonl');
+JS
+
+# 5.3 Lancer
+node import_bulk.mjs
+```
+
+Ajuste le lot `2000` selon ta VM.
+
+
+
+## 1.6) Méthode 6 — **Logstash** (dockerisé) pour très gros flux
+
+Simple pipeline : lit un NDJSON et pousse en bulk automatiquement.
+
+### 6.1 Docker Compose (service logstash optionnel)
+
+```yaml
+services:
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.14.3
+    container_name: ls-news
+    volumes:
+      - ./pipelines:/usr/share/logstash/pipeline
+      - ./data:/data          # place ici tes fichiers NDJSON
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - LS_JAVA_OPTS=-Xms512m -Xmx512m
+```
+
+### 6.2 Pipeline simple `pipelines/news.conf`
+
+```conf
+input {
+  file {
+    path => "/data/news.ndjson"
+    codec => json_lines
+    start_position => "beginning"
+    sincedb_path => "/usr/share/logstash/.sincedb_news"
+  }
+}
+filter { }
+output {
+  elasticsearch {
+    hosts => ["http://elasticsearch:9200"]
+    index => "news"
+    action => "index"
+    # template/mapping si besoin
+  }
+  stdout { codec => dots }
+}
+```
+
+### 6.3 Lancer
+
+```bash
+mkdir -p pipelines data
+# place ton fichier /data/news.ndjson
+docker compose up -d logstash
+docker logs -f ls-news
+```
+
+
+
+## 1.7) Méthode 7 — **Snapshot/Restore** (si tu as déjà un index prêt ailleurs)
+
+Plutôt que réindexer des millions de lignes, tu peux **restaurer** un snapshot.
+
+1. Déclare un repo snapshot (FS) et copie le snapshot :
+
+```bash
+# sur la machine "source", snapshot de l'index news
+# sur cette VM, configure un repo FS:
+sudo mkdir -p /srv/es-repo
+sudo chown 1000:1000 /srv/es-repo
+
+curl -X PUT 'http://localhost:9200/_snapshot/localrepo' -H 'Content-Type: application/json' -d '{
+  "type": "fs",
+  "settings": { "location": "/srv/es-repo" }
+}'
+```
+
+2. Restaure :
+
+```bash
+curl -X POST 'http://localhost:9200/_snapshot/localrepo/snap_news/_restore' \
+  -H 'Content-Type: application/json' -d '{
+  "indices": "news",
+  "include_global_state": false
+}'
+```
+
+
+
+## 1.8) Suivi & monitoring pendant l’import
+
+```bash
+# Santé & docs
+curl -s 'http://localhost:9200/_cluster/health?pretty'
+curl -s 'http://localhost:9200/news/_count?pretty'
+
+# Voir les tâches en cours (dont _bulk)
+curl -s 'http://localhost:9200/_tasks?detailed=true&actions=*bulk*&pretty'
+
+# Stats d’index
+curl -s 'http://localhost:9200/news/_stats?pretty'
+
+# Cat API (rapide)
+curl -s 'http://localhost:9200/_cat/indices?v'
+curl -s 'http://localhost:9200/_cat/thread_pool?v'
+```
+
+
+
+## 1.9) Erreurs fréquentes & corrections
+
+* **`"errors": true` dans la réponse `_bulk`**
+  Inspecte les éléments renvoyés : souvent un JSON mal formé (guillemets, encodage, tab au lieu d’espace).
+  Solution : localise la ligne fautive (par dichotomie ou `jq -c`), corrige et rejoue le chunk.
+
+* **`413 Request Entity Too Large`**
+  Ton payload bulk est trop gros. **Réduis la taille des chunks** (moins de lignes, < 10–20 Mo par POST).
+
+* **`429 Too Many Requests` / Rejections**
+  Tu pousses trop vite (trop de jobs ou chunks trop gros). **Réduis `-j`** (parallel) et/ou la taille des lots.
+  Attends, puis reprends où tu t’es arrêté.
+
+* **`Timeout`**
+  Utilise `request_timeout` plus élevé (clients Python/Node) ou **réduis** la taille des lots.
+
+* **Index “jaune/rouge”** après import
+  Vérifie `/_cluster/health`. Reviens à `number_of_replicas` normal, `/_refresh`, puis `/_forcemerge` si besoin :
+
+  ```bash
+  curl -s -X POST 'http://localhost:9200/news/_forcemerge?max_num_segments=1&pretty'
+  ```
+
+  (à faire hors charge, optionnel, pour réduire le nombre de segments)
+
+
+
+## 1.10) Checklist “import massif”
+
+1. Créer l’index avec mapping correct.
+2. `number_of_replicas: 0`, `refresh_interval: -1` pour l’import.
+3. Choisir une **méthode** (split + curl, gzip, Python, Node, Logstash).
+4. **Petits lots**, tester, puis monter progressivement.
+5. Surveiller `_tasks`, `_stats`, `_cat/indices`.
+6. Après import: remettre `replicas`, `refresh_interval`, `/_refresh`.
+7. (Option) `/_forcemerge` hors charge.
+8. Sauvegarder un **snapshot** une fois le corpus chargé.
+
+
+
+Avec ces méthodes, nous pouvons ingérer de très gros volumes de données sur notre VM Ubuntu sans nous bloquer : commençons simple (split + curl), passons au gzip/parallel si nécessaire, puis au streaming Python/Node ou Logstash pour les très grands jeux, tout en surveillant la santé du cluster et en appliquant les bons réglages d’indexation.
