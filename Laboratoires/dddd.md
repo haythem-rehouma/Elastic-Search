@@ -288,6 +288,43 @@ gzip -c news.bulk.ndjson > news.bulk.ndjson.gz
 
 # Partie 3 - Créer l’index `news` avec un mapping propre
 
+D'abord, un **shard** (éclat) est un « morceau » d’un index Elasticsearch. Au lieu de stocker tous tes documents dans un seul gros bloc, Elasticsearch découpe l’index en plusieurs blocs indépendants appelés shards. Chaque shard est comme une petite base Lucene complète : il peut être placé sur n’importe quel nœud du cluster, cherché en parallèle, puis les résultats sont fusionnés.
+
+Points clés :
+
+* **Primaires vs répliques**
+
+  * **Shard primaire** : contient les données « officielles ».
+  * **Shard de réplication** : copie du primaire pour la **tolérance aux pannes** et plus de **débit en lecture**. Si un nœud tombe, une réplique peut devenir primaire.
+
+* **Pourquoi on met `number_of_shards: 1` dans un lab**
+
+  * Un seul nœud + petit volume de données = inutile de se fragmenter.
+  * Plus simple à gérer, moins de surcoût, pas de distribution à orchestrer.
+
+* **Quand augmenter le nombre de shards**
+
+  * Très gros index (beaucoup de documents/volume) ou besoin d’**évolutivité** : plusieurs shards se répartissent sur plusieurs nœuds, les recherches s’exécutent en parallèle.
+  * Attention : trop de shards = overhead (mémoire/CPU) et latence.
+
+* **Répliques (`number_of_replicas`)**
+
+  * `0` en machine perso si tu veux économiser des ressources.
+  * `1` (ou plus) en prod pour **HA** et **lectures plus rapides**.
+
+* **Taille et limites pratiques**
+
+  * Viser des shards « sains » (souvent quelques Go à quelques dizaines de Go). Des milliers de petits shards nuisent aux performances.
+  * Le **nombre de shards primaires est fixé à la création** de l’index (tu ne peux pas le changer après, sauf en reindexant vers un nouvel index avec la bonne configuration).
+
+* **Résumé**
+  Un shard est une brique de stockage/recherche distribuable ; tu en mets **peu** pour un petit labo (1 primaire, 0 réplique), **plus** quand tu dois répartir la charge et assurer la haute disponibilité.
+
+
+Dans cette étape, on crée l’index `news` en définissant dès le départ un **mapping maîtrisé** pour obtenir des recherches pertinentes et des agrégations fiables. On fixe `number_of_shards` à 1 (lab local) et on ajoute un **normalizer** `lowercase_normalizer` afin d’avoir des valeurs « keyword » comparables sans sensibilité à la casse. Les champs textuels importants (`headline`, `short_description`, `authors`, `category`) sont déclarés en **multi-champs** : une version `text` pour le plein-texte (analyzers) et une sous-clé `keyword` pour les tris/agrégations/exact matches (avec `ignore_above` pour éviter des termes trop longs), plus `category.keyword_lower` pour des filtres insensibles à la casse. Le champ `date` est typé en **`date`** avec le format `yyyy-MM-dd` pour permettre les **filtres et histogrammes temporels**, et `link` est en **`keyword`** (valeur exacte non analysée). La première commande `PUT` crée l’index avec cette configuration; la seconde (`GET /news`) sert à **vérifier** que l’index existe bien avec les réglages attendus.
+
+
+
 ```bash
 curl -s -X PUT 'http://localhost:9200/news' -H 'Content-Type: application/json' -d '{
   "settings": {
@@ -322,6 +359,94 @@ curl -s http://localhost:9200/news | jq '.'
 <br/>
 
 # Partie 4 - Ingestion — 7 façons différentes (Annexe 1)
+
+Cette section présente, de façon opérationnelle, toutes les voies d’**ingestion** possibles vers Elasticsearch autour de la même idée clé : utiliser l’**API `_bulk`** qui attend du **NDJSON** (une ligne « action » puis une ligne « document », répété). Selon ton contexte, tu peux 1) pousser un fichier NDJSON complet via **`curl`** (simple et scriptable), 2) faire la même chose en **gzip** pour gagner en débit sur les gros jeux de données, 3) coller/valider tes blocs directement dans **Kibana → Dev Tools** (pratique pour tester et corriger), 4) automatiser par code avec **Python/Node.js** (clients HTTP, gestion d’erreurs, reprise), 5) passer par **Logstash** (lecture de fichiers streamée, robustesse, transformations), 6) utiliser **elasticdump** (outil « prêt à l’emploi » pour charger/exporter), ou 7) **découper en lots** et paralléliser pour accélérer tout en évitant les erreurs de type **413/429**. Au-delà de la tuyauterie, retiens les bonnes pratiques : **batchs raisonnables** (ex. 5–20 Mo par requête), **compression** quand c’est gros, **contrôle d’erreurs `_bulk`** (rejouer uniquement les items en échec), gestion du **`refresh`** (désactiver ou espacer pour la vitesse), optionnellement fixer **`_id`** (idempotence), et envisager un **ingest pipeline** si tu dois normaliser/enrichir à l’entrée. Résultat : une ingestion fiable, reproductible et adaptée à la taille de tes données.
+
+
+
+## NDJSON, c’est quoi ?
+
+**NDJSON** = **N**ewline **D**elimited **JSON**
+C’est juste **une suite d’objets JSON**, **un par ligne**, séparés par des **retours à la ligne**.
+Chaque ligne est un JSON complet. On **ne met pas** de crochets `[` `]` autour de l’ensemble.
+
+### Exemple (NDJSON)
+
+```
+{"id":1,"titre":"A"}
+{"id":2,"titre":"B"}
+{"id":3,"titre":"C"}
+```
+
+Trois lignes = trois objets.
+
+### En quoi c’est différent du JSON « classique » ?
+
+JSON « classique » pour une liste, c’est un **tableau** :
+
+```
+[
+  {"id":1,"titre":"A"},
+  {"id":2,"titre":"B"},
+  {"id":3,"titre":"C"}
+]
+```
+
+En NDJSON, **pas de tableau** et **pas de virgules** entre les objets, juste **une ligne = un objet**.
+
+## Pourquoi Elasticsearch aime le NDJSON ?
+
+L’API **`_bulk`** lit le fichier **ligne par ligne**.
+Elle attend des **paires de lignes** :
+
+1. **Ligne d’action** (ex. `{"index":{"_index":"news"}}`)
+2. **Ligne document** (ton objet JSON)
+
+Exemple minimal pour `_bulk` :
+
+```
+{"index":{"_index":"news"}}
+{"id":1,"headline":"Titre A"}
+{"index":{"_index":"news"}}
+{"id":2,"headline":"Titre B"}
+```
+
+## Règles à mémoriser
+
+* **Une ligne = un JSON valide** (UTF-8, guillemets doubles `"`, pas de virgules en fin de ligne).
+* **Pas de crochets** autour de l’ensemble.
+* Pour `_bulk`, **action** et **document** vont **par deux lignes**, répétées.
+* La **dernière ligne se termine par un retour à la ligne** (important pour certains parseurs).
+
+## Avantages
+
+* Très **facile à streamer** (on traite une ligne à la fois).
+* Parfait pour les **gros fichiers** (on peut découper par blocs de lignes).
+* Compatible avec **`curl`**, **Logstash**, et les **clients** (Python/Node).
+
+## Erreurs classiques (et corrections)
+
+* ❌ Vous mettez `[` `]` autour de tout → **retirez-les** en NDJSON.
+* ❌ Vous mettez des virgules entre les objets → **enlevez les virgules**.
+* ❌ Vous oubliez la ligne d’action pour `_bulk` → **ajoutez-la** avant chaque document.
+* ❌ Vous collez des retours à la ligne à l’intérieur d’un objet → **un objet doit tenir sur une seule ligne** (échapper les sauts de ligne en `\n` si besoin).
+
+## Astuces pratiques
+
+* Transformer JSON « tableau » → NDJSON (jq) :
+
+```bash
+jq -c '.[]' tableau.json > data.ndjson
+```
+
+* Préparer `_bulk` (ajouter l’action avant chaque ligne) :
+
+```bash
+awk '{print "{\"index\":{\"_index\":\"news\"}}"; print}' data.ndjson > bulk.ndjson
+```
+
+En résumé : **NDJSON = des objets JSON, chacun sur sa propre ligne**. C’est ce format ligne-par-ligne qui permet à Elasticsearch de **charger vite et par paquets** via l’API `_bulk`.
+
 
 ## Méthode A — `curl` (bulk NDJSON classique)
 
