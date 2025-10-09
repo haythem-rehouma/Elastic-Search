@@ -536,7 +536,7 @@ docker compose down -v
 <br/>
 <br/>
 
-# Annexe 1 - Procédure **rapide et sûre** pour libérer **9200** (Elasticsearch) ou **5601** (Kibana) quand `ss -lnt | grep -E ':9200|:5601'` montre qu’ils sont occupés.
+##### Annexe 1 - Procédure **rapide et sûre** pour libérer **9200** (Elasticsearch) ou **5601** (Kibana) quand `ss -lnt | grep -E ':9200|:5601'` montre qu’ils sont occupés.
 
 ## 1) Identifier le processus fautif
 
