@@ -1,11 +1,20 @@
-génial — on y va tout de suite, **ultra-guidé de A à Z**, avec ton dataset JSON (catégorie, titre, auteur, lien, description, date). Tu vas :
 
-1. lancer un mini-ELK (Elasticsearch + Kibana) en **Docker** (sécurité désactivée pour apprendre tranquille)
-2. créer un **index `news`** avec un **mapping propre** (date, text/keyword, analyzers)
-3. **ingérer** tes lignes JSON (au format **NDJSON / _bulk**)
-4. exécuter **plein de requêtes** (match, phrase, multi_match, bool, range, minimum_should_match, aggregations, significant_text, date_histogram, top_hits, …)
-5. construire **quelques visualisations** rapides dans **Kibana**
-6. bonus: autocomplétion (suggester), surlignage (highlight), filtres analyzers FR/EN, export/backup.
+# Introduction du lab 
+
+Vous allez bâtir une mini-plateforme de recherche d’actualités avec **Elasticsearch** et **Kibana** à partir d’un dataset JSON (catégorie, titre, auteur, lien, description, date).
+
+À l’issue du lab, vous saurez :
+
+* **Déployer** Elasticsearch + Kibana via Docker et vérifier la santé des services.
+* **Modéliser** un index `news` avec un **mapping propre** (`text`/`keyword`, `date`, analyzers).
+* **Ingerer** des documents en **NDJSON** via l’API `_bulk`.
+* **Interroger** efficacement (match, match_phrase, multi_match, bool, range, minimum_should_match) et **expliquer** la pertinence (highlight).
+* **Explorer** avec des **agrégations** (terms, date_histogram, significant_text, top_hits).
+* **Visualiser** dans Kibana (graphiques simples, tableau de bord).
+* Bonus : **autocomplétion** (suggester), analyzers FR/EN, export/backup.
+
+Pré-requis : Docker/Compose, `curl` (et idéalement `jq`), 3 Go RAM libres, ports 9200/5601 disponibles.
+
 
 
 
