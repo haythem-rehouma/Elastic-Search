@@ -36,7 +36,7 @@ Pré-requis : Docker/Compose, `curl` (et idéalement `jq`), 3 Go RAM libres, por
 
 
 
-# Partie 1 — Démarrage complet d’ELK en Docker (avec persistance)
+# Partie 1 — Démarrage complet d’ELK en Docker, avec persistance (Annexe 1)
 
 ## A) Pré-requis rapides
 
@@ -252,7 +252,7 @@ Cette partie 1 met en place une base ELK fiable et persistante sur ta VM. À par
 
 
 
-# Partie 2 - Préparer ton dataset et le convertir en NDJSON
+# Partie 2 - Préparer ton dataset et le convertir en NDJSON (Annexe 1 et Annexe 2)
 
 ### 2.1. Mettre tes lignes JSON brutes dans un fichier
 
@@ -1918,3 +1918,360 @@ curl -s 'http://localhost:9200/_cat/thread_pool?v'
 
 
 Avec ces méthodes, nous pouvons ingérer de très gros volumes de données sur notre VM Ubuntu sans nous bloquer : commençons simple (split + curl), passons au gzip/parallel si nécessaire, puis au streaming Python/Node ou Logstash pour les très grands jeux, tout en surveillant la santé du cluster et en appliquant les bons réglages d’indexation.
+
+
+
+<br/>
+<br/>
+
+# Annexe 2 pour l'étape 2 (PARTIE 1) — Préparer le NDJSON pour `_bulk`
+
+## 2.1. Mettre tes **lignes JSON brutes** dans un fichier
+
+Objectif : avoir **un article par ligne**, JSON valide, encodé **UTF-8**, sans virgule finale, sans crochets `[]`.
+
+```bash
+cd ~/elk-news
+cat > raw.jsonl <<'JSON'
+{"category":"POLITICS","headline":"Ryan Zinke Looks To Reel Back Some Critics With 'Grand Pivot' To Conservation","authors":"Chris D'Angelo","link":"https://www.huffingtonpost.com/entry/ryan-zinke-reel-back-critics-grand-pivot-conservation_us_5b086c78e4b0fdb2aa538b3f","short_description":"The interior secretary attempts damage control...","date":"2018-05-26"}
+{"category":"POLITICS","headline":"Trump's Scottish Golf Resort Pays Women Significantly Less Than Men: Report","authors":"Mary Papenfuss","link":"https://www.huffingtonpost.com/entry/trump-scottish-golf-resort-pays-women-less-than-men_us_5b08ca29e4b0802d69cb4d37","short_description":"And there are four times as many male as female executives.","date":"2018-05-26"}
+# ... colle toutes tes lignes ici (une par article)
+JSON
+```
+
+### Vérifications de base (fortement recommandé)
+
+1. Chaque ligne est un JSON valide :
+
+```bash
+# Affiche les lignes invalides (si rien ne s’affiche, tout va bien)
+nl -ba raw.jsonl | while IFS= read -r line; do
+  num="${line%%\t*}"; json="${line#*$'\t'}"
+  echo "$json" | jq -e . >/dev/null 2>&1 || echo "Ligne $num invalide"
+done
+```
+
+2. Compter le nombre de lignes :
+
+```bash
+wc -l raw.jsonl
+# → ce nombre = nombre de documents à indexer
+```
+
+3. Aperçu rapide (début/fin) :
+
+```bash
+head -n3 raw.jsonl
+tail -n3 raw.jsonl
+```
+
+4. Supprimer les retours Windows (si tu as copié depuis Windows) :
+
+```bash
+sed -i 's/\r$//' raw.jsonl
+```
+
+
+
+## 2.2. Transformer en **NDJSON pour `_bulk`**
+
+Le format `_bulk` exige **deux lignes par document** :
+
+* une ligne **action** : `{"index":{"_index":"news"}}`
+* une ligne **source** : ton JSON
+
+### Option A — Commande la plus simple (awk)
+
+```bash
+awk '{print "{\"index\":{\"_index\":\"news\"}}"; print}' raw.jsonl > news.bulk.ndjson
+```
+
+Vérifier que tu as bien le **double de lignes** :
+
+```bash
+wc -l raw.jsonl news.bulk.ndjson
+# news.bulk.ndjson doit avoir 2x plus de lignes que raw.jsonl
+```
+
+Aperçu (tu dois voir une alternance action/source) :
+
+```bash
+head -n6 news.bulk.ndjson
+```
+
+### Option B — Ajouter un **_id** déterministe (ex. hash SHA1 du titre)
+
+Utile pour éviter les doublons si tu rejoues l’import.
+
+```bash
+awk '
+  {
+    cmd = "printf %s \"" $0 "\" | sha1sum | cut -d\" \" -f1";
+    cmd | getline h; close(cmd);
+    print "{\"index\":{\"_index\":\"news\",\"_id\":\"" h "\"}}";
+    print $0
+  }
+' raw.jsonl > news.bulk.withid.ndjson
+```
+
+### Option C — Avec `jq` (si tu veux modifier/nettoyer au passage)
+
+Exemple : forcer la date au format `yyyy-MM-dd` (si déjà bon, ça ne change rien) :
+
+```bash
+jq -c '
+  .date |= ( . | split("T")[0] )
+  | {index:{_index:"news"}}, .
+' raw.jsonl > news.bulk.ndjson
+```
+
+> `jq` produit déjà la séquence action/source correctement (une paire par document).
+
+### Option D — Fichier très gros : **compression** et **découpage**
+
+1. Compresser :
+
+```bash
+gzip -c news.bulk.ndjson > news.bulk.ndjson.gz
+ls -lh news.bulk.ndjson*
+```
+
+2. Découper en morceaux de 5 000 lignes (≈ 2 500 docs) pour import progressif :
+
+```bash
+mkdir -p chunks
+split -l 5000 --numeric-suffixes=1 --additional-suffix=.ndjson news.bulk.ndjson chunks/part_
+ls -l chunks | head
+```
+
+> Règle : vise des fichiers **≤ 10–20 Mo** par envoi (selon ta VM).
+
+
+## 2.3. Charger le NDJSON (premier test)
+
+Test minimal (sur un petit extrait) :
+
+```bash
+# créer un mini-fichier de test (2 docs)
+head -n4 news.bulk.ndjson > test.bulk.ndjson
+
+# indexation de test
+curl -s -H 'Content-Type: application/x-ndjson' \
+     -X POST 'http://localhost:9200/_bulk?pretty' \
+     --data-binary @test.bulk.ndjson
+```
+
+Vérifier les compteurs :
+
+```bash
+curl -s 'http://localhost:9200/news/_count?pretty'
+```
+
+Si tout est bon, **charge l’ensemble** :
+
+```bash
+curl -s -H 'Content-Type: application/x-ndjson' \
+     -X POST 'http://localhost:9200/_bulk?pretty' \
+     --data-binary @news.bulk.ndjson | jq '.errors'
+# doit afficher: false
+```
+
+### Variante gzip (plus rapide, moins d’I/O)
+
+```bash
+gzip -c news.bulk.ndjson | \
+curl -s -H 'Content-Type: application/x-ndjson' \
+       -H 'Content-Encoding: gzip' \
+       -X POST 'http://localhost:9200/_bulk?pretty' \
+       --data-binary @- | jq '.errors'
+```
+
+### Variante par **chunks** (recommandée pour gros volumes)
+
+```bash
+for f in chunks/part_*; do
+  echo "Import: $f"
+  curl -s -H 'Content-Type: application/x-ndjson' \
+       -X POST 'http://localhost:9200/_bulk' \
+       --data-binary @"$f" | jq '.errors'
+done
+
+curl -s 'http://localhost:9200/news/_count?pretty'
+```
+
+
+
+## 2.4. Contrôles rapides post-import
+
+```bash
+# 5 documents au hasard
+curl -s 'http://localhost:9200/news/_search' -H 'Content-Type: application/json' -d '{
+  "size": 5, "_source": ["date","category","headline","authors"]
+}' | jq '.hits.hits[]._source'
+
+# Compte total
+curl -s 'http://localhost:9200/news/_count?pretty'
+```
+
+
+
+## 2.5. Dépannage express
+
+* **`"errors": true` dans la réponse bulk**
+  Cherche la première erreur dans la réponse (champ `items`). Souvent : JSON mal formé (guillemets, caractères spéciaux non échappés), champ `date` invalide, ou un retour Windows `\r`.
+
+  * Localiser la ligne fautive par dichotomie : coupe ton fichier en deux et reteste.
+  * Vérifier l’encodage : `file -bi raw.jsonl` doit contenir `charset=utf-8`.
+  * Nettoyer `\r` : `sed -i 's/\r$//' raw.jsonl` puis régénérer le bulk.
+
+* **Payload trop gros (`413 Request Entity Too Large`)**
+  Découpe en **plus petits chunks** (`split -l 5000` ou moins).
+
+* **Trop de requêtes (`429`)**
+  Réduis la taille des chunks et/ou fais l’import **séquentiel** (pas de parallélisme).
+
+* **Dates refusées**
+  Ton mapping attend `yyyy-MM-dd`. Assure-toi que `date` a ce format (cf. filtre `jq` plus haut).
+
+* **Doublons**
+  Utilise l’option **_id déterministe** (Option B) pour écraser/éviter les doublons.
+
+
+
+## 2.6. Récap ultra-court
+
+1. `raw.jsonl` = 1 doc JSON valide par ligne.
+2. Transforme en `_bulk` : **action + source** (awk ou jq).
+3. Teste sur **4 lignes** (`head -n4 …`) puis charge tout.
+4. Pour gros fichiers : **split** en chunks, **gzip** possible.
+5. Vérifie `_count`, puis passe à la suite (requêtes, aggrégations, Kibana).
+
+
+<br/>
+<br/>
+
+
+
+
+# Annexe 2 pour l'étape 2 (PARTIE 2) —Importer via l’interface Kibana (Upload a file)
+
+## A) Ce qu’il faut préparer
+
+* Utilise **le fichier brut** `raw.jsonl` (une **ligne JSON = 1 article**).
+  **Ne pas** utiliser le fichier `_bulk` (avec lignes `{"index":…}`) pour cette méthode.
+* Assure-toi que le champ `date` est au format `YYYY-MM-DD`.
+
+## B) Chemin exact dans Kibana
+
+1. Ouvre **[http://localhost:5601](http://localhost:5601)**.
+2. Menu latéral → **Analytics** → **Discover** (ou **Machine Learning** → **Data Visualizer** selon ta version)
+3. Clique **Upload a file** (ou **File Data Visualizer** → **Select file**).
+4. Glisse-dépose `raw.jsonl` ou clique **Select file**.
+
+> Kibana lit **CSV/TSV/NDJSON**. Ton `raw.jsonl` est un **NDJSON** (un JSON par ligne).
+
+## C) Assistant d’import (écran par écran)
+
+1. **Preview & Parse**
+
+   * Vérifie l’aperçu des champs.
+   * Si la **date** n’est pas reconnue, choisis **Set time field → date** puis **Format → yyyy-MM-dd**.
+2. **Transform (facultatif)**
+
+   * Tu peux renommer des champs ou exclure des colonnes si besoin.
+3. **Index settings**
+
+   * **Index name** : `news` (ou `news-raw` si tu veux garder `news` pour un mapping avancé).
+   * **Create index pattern** : coche pour créer le data view automatiquement.
+   * Laisse les autres options par défaut pour commencer.
+4. **Import**
+
+   * Clique **Import** et attends la fin (Kibana crée un index, un data view et un ingest pipeline minimal si nécessaire).
+
+## D) Vérifier immédiatement
+
+* Va dans **Discover** → choisis le data view (souvent `news*`).
+* Mets le time picker sur un intervalle large (ex. **Last 15 years**).
+* Tu dois voir tes documents, filtrables par `category`, `authors`, etc.
+
+
+
+# Variante 2 — Import dans un **index existant** (mapping maîtrisé)
+
+Si tu veux **imposer ton mapping** (analyzers, sous-champs keyword, normalizer…), fais d’abord la création d’index (une seule fois) puis **uploade dedans**.
+
+1. Crée l’index `news` (mapping propre) via **Kibana → Dev Tools → Console** :
+
+```json
+PUT news
+{
+  "settings": {
+    "number_of_shards": 1,
+    "analysis": {
+      "normalizer": {
+        "lowercase_normalizer": { "type": "custom", "filter": ["lowercase"] }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "date":    { "type": "date", "format": "yyyy-MM-dd" },
+      "category": {
+        "type": "text",
+        "fields": {
+          "keyword":       { "type": "keyword" },
+          "keyword_lower": { "type": "keyword", "normalizer": "lowercase_normalizer" }
+        }
+      },
+      "headline": {
+        "type": "text",
+        "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } }
+      },
+      "authors": {
+        "type": "text",
+        "fields": { "keyword": { "type": "keyword" } }
+      },
+      "short_description": {
+        "type": "text",
+        "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } }
+      },
+      "link": { "type": "keyword" }
+    }
+  }
+}
+```
+
+2. Reviens à **Upload a file** et, dans l’étape **Index settings**, choisis **Use existing index** → saisis **`news`**.
+   Kibana enverra les documents dans **ton** index (avec **tes** types/analyzers).
+
+
+
+# Variante 3 — Interface **Logstash** (assistant visuel)
+
+Si tu préfères un pipeline graphique :
+
+1. **Stack Management** → **Ingest Pipelines** → **Create pipeline** (facultatif si tu dois nettoyer la date/texte).
+2. **Integrations** → **Logstash** → suis l’assistant (il te donne un `pipelines.conf`).
+3. Dans **/etc/logstash/conf.d/news.conf** (sur ta VM), configure un input **file** sur `raw.jsonl` (codec json_lines), output **Elasticsearch** index `news`.
+4. Démarre Logstash.
+   C’est plus lourd, mais tout par interface/assistants; utile pour **très gros fichiers**.
+
+
+
+# Conseils pratiques (interface)
+
+* **Fichier trop gros** via navigateur :
+  Passe par **Settings → Advanced Settings** et augmente `xpack.fileUpload.maxFileSize` (si ta version l’expose). Sinon, coupe le fichier (ex. 50–100 MB) avec `split` et uploade en **plusieurs fois**.
+* **Dates non reconnues** : dans l’assistant, force **Time field = date** et **format yyyy-MM-dd**.
+* **Duplication** : si tu réimportes le même fichier, tu auras des doublons (Kibana ne met pas d’`_id` déterministe). Pour éviter ça, importe dans un index **neuf** (ex. `news_v2`), ou fais du pré-traitement côté VM pour générer un `_id` (méthode API ou Logstash).
+* **Encodage** : garde le fichier en **UTF-8** et supprime les `\r` Windows : `sed -i 's/\r$//' raw.jsonl`.
+
+
+# Check-list ultra-courte
+
+1. Fichier **`raw.jsonl`** = un JSON par ligne.
+2. Kibana → **Upload a file** → sélectionne ton fichier.
+3. Time field **date**, format **yyyy-MM-dd**.
+4. **Index name** = `news` (ou `news-raw`), **Create index pattern** coché.
+5. **Import**, puis **Discover** pour vérifier.
+
