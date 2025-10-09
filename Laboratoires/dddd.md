@@ -16,15 +16,20 @@ Vous allez bâtir une mini-plateforme de recherche d’actualités avec **Elasti
 Pré-requis : Docker/Compose, `curl` (et idéalement `jq`), 3 Go RAM libres, ports 9200/5601 disponibles.
 
 
+<br/>
+<br/>
+
+# 0) Pré-requis rapides
+
+* Docker et Docker Compose installés
+  Vérifier : `docker --version` et `docker compose version`
+* Ports disponibles : **9200** (Elasticsearch) et **5601** (Kibana)
+  Vérifier : `ss -lnt | grep -E ':9200|:5601'` (aucune ligne ne doit s’afficher)
+* Terminal opérationnel sur la VM (accès root/sudo si besoin)
+* Outils conseillés : `curl` (et `jq` pour lire les réponses JSON)
+  Installer si nécessaire : `sudo apt-get install -y curl jq`
 
 
-# 0) Pré-requis rapides (déjà faits pour toi plus haut, mais je résume)
-
-* Docker & Docker Compose installés ✅
-* Port 9200 (ES) et 5601 (Kibana) libres ✅
-* Un terminal sur ta VM ✅
-
----
 
 # 1) Lancer Elasticsearch + Kibana (compose prêt à copier/coller)
 
