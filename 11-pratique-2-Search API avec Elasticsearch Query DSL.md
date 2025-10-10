@@ -268,3 +268,6 @@ FROM news
 | LIMIT 20
 ```
 
+# Exercice :
+
+- Donnez les 15 titres les plus récents de WORLD NEWS contenant North Korea
