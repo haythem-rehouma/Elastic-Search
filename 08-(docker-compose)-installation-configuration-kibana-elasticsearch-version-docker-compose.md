@@ -252,3 +252,11 @@ Les problème rencontrées peuvent venir principalement de trois points :
 * assurez-vous que vous n’avez pas d’espace en trop et que la casse est correcte ;
 * que Kibana est bien sur `http://localhost:5601` et qu’Elasticsearch répond (`curl -u elastic:$ELASTIC_PASSWORD http://localhost:9200/`).
 
+
+
+
+# Annexe 3 - fichier à téléverser
+
+- https://drive.google.com/drive/u/1/folders/17vTaNQFnTyhEcizFYofLpdfd-f792utk
+
+
