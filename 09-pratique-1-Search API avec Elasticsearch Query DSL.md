@@ -4,7 +4,7 @@
   
 ## Méthode 1 (sans terminal) — via l’UI Kibana
 
-1. Dans Kibana (ta capture), ouvre le menu (☰ en haut à gauche)
+1. Dans Kibana, ouvre le menu (☰ en haut à gauche)
 2. va dans **Machine Learning → Data Visualizer → File** (ou “Upload a file”).
 3. **Glisse ton fichier** dans la zone (ou clique *Select file* et prends-le depuis `~/Téléchargements`).
 
