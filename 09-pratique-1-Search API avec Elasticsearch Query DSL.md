@@ -1217,3 +1217,83 @@ FROM news
 # Exercice :
 
 - Trouvez le *Top 5 catégories entre 2018-05-20 et 2018-05-31 puis listez des 10 titres les plus récents de POLITICS*
+
+
+
+
+
+<br/>
+<br/>
+
+
+# EXERCICES - PARTIE 5
+
+*(Index : `news` — Champ date : `date`)*
+
+### Règles générales
+
+* Toutes les réponses doivent être des **blocs JSON complets**, prêts à exécuter dans **Kibana → Dev Tools → Console**.
+* Spécifier toujours le **tri**, les **champs retournés** (`_source`), et la **limite** (`size`) quand c’est demandé.
+
+
+
+
+## **PARTIE A — Lecture et filtres simples (Niveau 1/5)**
+
+1. **Afficher les 10 derniers documents**, triés par `date` décroissante, en ne retournant que `headline`, `date`, `category`, `authors` et `link`.
+2. **Afficher tous les documents** dont `category = "POLITICS"`, triés par `date desc`, `size: 10`.
+3. **Afficher les documents** où `category` **n’est pas** `"POLITICS"` **et** où le champ `authors` **existe**.
+4. **Afficher les documents** publiés entre le `2018-05-20` et le `2018-06-01`, triés par `date desc`.
+5. **Afficher les documents** appartenant à l’une des catégories : `"POLITICS"`, `"WORLD NEWS"`, `"CRIME"`.
+   Trier par `date desc`, limiter à 20 résultats.
+
+
+
+## **PARTIE B — Recherches plein texte (Niveau 2/5)**
+
+6. **Chercher le mot “Trump”** dans `headline` et `short_description`, avec un **boost** sur `headline`.
+7. **Chercher l’expression exacte “North Korea”** dans `headline`, tri `date desc`.
+8. Même périmètre que (7) : **ajouter un `highlight`** sur `headline` et `short_description`.
+9. **Afficher les documents** dont la `category` **commence par “POL”**, tri `date desc`.
+10. **Afficher 20 documents** dont le champ `authors` est **absent ou vide**.
+
+
+
+## **PARTIE C — Agrégations et regroupements (Niveau 3/5)**
+
+11. **Top 10 des catégories** : `size: 0`, agrégation `terms` sur `category`, ordre par `_count desc`.
+    11-bis. **Afficher toutes les catégories distinctes**, triées **alphabétiquement** (ordre `_key asc`, `size: 0`).
+12. **Histogramme par jour** des articles où `category = "POLITICS"`.
+13. **Top 10 auteurs** pour la période `2018-05-25` → `2018-05-31`.
+14. **Par catégorie**, afficher les **3 titres les plus récents** (`headline, date, link`) : `terms` + `top_hits`.
+15. **Détecter les doublons d’URL** : `terms` sur `link` avec `min_doc_count: 2`.
+
+
+
+## **PARTIE D — Déduplication et expressions régulières (Niveau 4/5)**
+
+16. **Afficher un seul document par URL** en utilisant `collapse` sur `link`, tri `date desc`.
+17. **Afficher 20 documents** dont `authors` **se termine par** “er” (regex).
+18. **Requête complète** : plein texte `"election"` (multi-champs `headline` + `short_description` boosté)
+     + filtre sur `category ∈ ["POLITICS","WORLD NEWS"]`
+     + période `2018-05-20` → `2018-06-01`, tri `date desc`, retourner uniquement `headline, date, category, authors, link`.
+19. **Agrégation composite** sur `category` (taille 5) : produire la **1ʳᵉ page** et indiquer comment obtenir la suivante (`after`).
+20. **Agrégation multi-niveaux** : `terms` par `category` → sous-`terms` par `authors` (taille 5) → sous-`top_hits` (dernier article, tri `date desc`).
+
+
+
+## **PARTIE E — Tri avancé et pagination (Niveau 4–5/5)**
+
+21. **Tri combiné** : résultats classés d’abord par **pertinence**, puis par `date desc`.
+22. **Pagination `search_after` — page 1** : trier par `date desc`, puis `_id asc`, `size: 10`.
+23. **Pagination `search_after` — page 2** : réémettre la requête précédente avec les **valeurs de tri** de la dernière ligne de la page 1.
+
+
+
+## **PARTIE F — Analyse et calculs (Niveau 5/5)**
+
+24. **Extraction de termes significatifs** : `significant_text` sur `headline`, filtrer `category = "POLITICS"`.
+25. **Champ calculé (`runtime_mappings`)** : calculer la **longueur en mots** de `short_description`,
+     trier les résultats par ce champ décroissant, retourner les 10 plus longs.
+
+
