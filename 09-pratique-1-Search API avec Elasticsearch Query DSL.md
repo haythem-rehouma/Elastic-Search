@@ -964,7 +964,7 @@ Avec ces vérifications, tu évites la plupart des surprises lors des requêtes 
 
 
 -------------------------------------
-# Exercices
+# EXERCICES - PARTIE 4
 -------------------------------------
 
 > Expliquez ces requêtes
@@ -1159,7 +1159,7 @@ GET news/_search
 }
 ```
 
----
+
 
 # 4) ES|QL (option lisible “style SQL”)
 
@@ -1204,7 +1204,7 @@ FROM news
 | ORDER BY day
 ```
 
----
+
 
 # 5) Petits tips
 
@@ -1214,7 +1214,7 @@ FROM news
 
 
 
-# Exercice :
+# EXERCICES - PARTIE 5
 
 - Trouvez le *Top 5 catégories entre 2018-05-20 et 2018-05-31 puis listez des 10 titres les plus récents de POLITICS*
 
@@ -1226,7 +1226,7 @@ FROM news
 <br/>
 
 
-# EXERCICES - PARTIE 5
+# EXERCICES - PARTIE 6
 
 *(Index : `news` — Champ date : `date`)*
 
