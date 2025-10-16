@@ -473,7 +473,7 @@ Le champ `headline` est **boosté** (avec `^2`) : cela signifie que le moteur do
 
 ## 3.a.2. Structure typique de la réponse JSON
 
-Voici un exemple simplifié et réaliste de la réponse reçue :
+Je vous présente un exemple simplifié et réaliste de la réponse reçue :
 
 ```json
 {
