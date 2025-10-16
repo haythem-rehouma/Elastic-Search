@@ -1,6 +1,6 @@
 # Partie 1 : importer les données
 
-- https://drive.google.com/drive/folders/17vTaNQFnTyhEcizFYofLpdfd-f792utk?usp=sharing
+- https://drive.google.com/drive/folders/17vTaNQFnTyhEcizFYofLpdfd-f792utk?usp=sharing (News_Category_Dataset_v2.json)
   
 ## Méthode 1 (sans terminal) — via l’UI Kibana
 
