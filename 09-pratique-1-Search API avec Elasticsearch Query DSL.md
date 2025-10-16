@@ -111,6 +111,15 @@ Je vous fais un mémo ultra-pratique avec des exemples pour notre schéma (`cate
 
 # 1) KQL (barre de recherche dans Discover)
 
+
+- **KQL (Kibana Query Language)** est le langage de requête intégré à la barre de recherche de **Discover** dans Kibana.
+Il permet d’explorer et de filtrer rapidement les documents d’un index Elasticsearch à l’aide d’une syntaxe simple et lisible.
+KQL est conçu pour les **recherches interactives**, sans avoir à écrire de JSON ni de code complexe.
+Il fonctionne sur les champs des documents et gère à la fois les **filtres exacts** (sur les champs *keyword*) et les **recherches plein texte** (sur les champs *text*).
+C’est la méthode la plus intuitive pour interroger visuellement des données avant de passer à des requêtes plus avancées en **ES|QL** ou en **DSL JSON**.
+
+
+
 * Tous les articles de la catégorie “POLITICS” :
 
 ```
