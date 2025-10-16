@@ -751,7 +751,7 @@ GET news/_search
 }
 ```
 
-> Exercice : expliquez la requête
+> Exercices partie 1 : expliquez la requête
 
 ### d) Histogramme temporel
 
@@ -792,7 +792,7 @@ GET news/_search
 }
 ```
 
-> Exercice : expliquez la requête
+> Exercices partie 2 : expliquez la requête
 
 ### f) `curl` depuis ta VM (tu as les vars `.env`)
 
@@ -805,7 +805,7 @@ curl -u elastic:$ELASTIC_PASSWORD 'http://localhost:9200/news/_search?pretty' \
 }'
 ```
 
-> Exercice : expliquez la requête
+> Exercices partie 3 : expliquez la requête
 
 <br/>
 <br/>
@@ -874,7 +874,7 @@ GET news/_mapping
 * Si `news` est absent, ta phase d’ingestion n’a pas abouti (reprendre import/bulk).
 * Si `health` est `red`, vérifier les logs et la disponibilité des shards.
 
----
+
 
 ## 3) `GET news/_count`
 
