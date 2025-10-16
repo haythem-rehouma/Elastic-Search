@@ -108,3 +108,55 @@ curl -u elastic:$ELASTIC_PASSWORD 'http://localhost:9200/news/_search?pretty' \
 * **text** : `headline`, `short_description` → plein texte
 * **keyword** : `category`, `authors`, `link` → filtres/aggs
 * **date** : `date` → range, histogrammes
+
+
+
+
+<br/>
+<br/>
+
+# Travail de groupe — Rapport DSL Elasticsearch
+
+## Composition
+
+* **Groupes de 5 étudiants**.
+
+## Objet
+
+Produire un **rapport** répondant à **6 séries de questions** portant sur l’index **`news`** (champ temporel : **`date`**).
+
+## Périmètre des réponses
+
+* **Langage exclusif** : **Elasticsearch Query DSL (JSON)**.
+* Les blocs doivent être **exécutables tels quels** dans **Kibana → Dev Tools → Console**.
+
+## Pour chaque question (obligatoire)
+
+1. **Bloc JSON complet** (DSL only).
+2. **Capture d’écran** du **résultat** d’exécution dans Kibana.
+3. **Interprétation** en **3–5 lignes** : que montrent les résultats ? comment les lire ? (référence au tri, taille, champs).
+
+> Pensez à expliciter **`sort`**, **`size`** et **`_source`** quand c’est pertinent de l'utiliser.
+
+## Où trouver les séries de questions
+
+Récupérez-les dans le document suivant :
+
+[https://github.com/haythem-rehouma/Elastic-Search/blob/main/09-pratique-1-Search%20API%20avec%20Elasticsearch%20Query%20DSL.md](https://github.com/haythem-rehouma/Elastic-Search/blob/main/09-pratique-1-Search%20API%20avec%20Elasticsearch%20Query%20DSL.md)
+
+Sections à traiter :
+
+* **Exercices partie 1 : expliquez la requête**
+* **Exercices partie 2 : expliquez la requête**
+* **Exercices partie 3 : expliquez la requête**
+* **EXERCICES – PARTIE 4**
+* **EXERCICES – PARTIE 5**
+* **EXERCICES – PARTIE 6**
+
+## Évaluation (barème indicatif)
+
+* **Respect strict des consignes (DSL only, exécutable, tri/size/_source)** : **40 %**
+* **Exactitude technique des requêtes et cohérence des résultats** : **40 %**
+* **Clarté des explications et du rapport (captures lisibles, interprétation concise, structuration)** : **20 %**
+
+
